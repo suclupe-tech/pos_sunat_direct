@@ -1,0 +1,33 @@
+<odoo>
+    <record id="view_pos_order_form_sunat_direct" model="ir.ui.view">
+        <field name="name">pos.order.form.sunat.direct</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <group string="SUNAT Directo">
+                    <field name="sunat_state" readonly="1"/>
+                    <field name="sunat_document_type" readonly="1"/>
+                    <field name="sunat_document_number" readonly="1"/>
+                    <field name="sunat_message" readonly="1"/>
+                    <field name="sunat_xml" readonly="1"/>
+                    <field name="sunat_xml_filename" readonly="1"/>
+                    <field name="sunat_xml_file" filename="sunat_xml_filename"/>
+                    <field name="sunat_zip_filename" readonly="1"/>
+                    <field name="sunat_zip_file" filename="sunat_zip_filename"/>
+                </group>
+            </xpath>
+            <xpath expr="//header" position="inside">
+                <button name="action_generate_sunat_xml"
+                        string="Generar XML SUNAT"
+                        type="object"
+                        class="btn-secondary"/>
+                
+                <button name="action_send_sunat"
+                        string="Enviar a SUNAT"
+                        type="object"
+                        class="btn-primary"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
