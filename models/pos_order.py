@@ -1,329 +1,211 @@
-from odoo import api, fields, models
-from odoo.exceptions import UserError
-import base64
-import zipfile
-import io
-import requests
+from odoo import models, fields
 
 
-class PosOrder(models.Model):
-    _inherit = "pos.order"
+class PosSession(models.Model):
+    _inherit = "pos.session"
 
-    sunat_state = fields.Selection(
-        [
-            ("pending", "Pendiente"),
-            ("sent", "Enviado"),
-            ("accepted", "Aceptado"),
-            ("error", "Error"),
-        ],
-        string="Estado SUNAT",
-        default="pending",
-        copy=False,
-    )
-
-    sunat_document_type = fields.Selection(
-        [
-            ("01", "Factura"),
-            ("03", "Boleta"),
-        ],
-        string="Tipo de Comprobante",
-        compute="_compute_sunat_document_type",
-        store=True,
-    )
-
-    sunat_document_number = fields.Char(string="Número SUNAT", copy=False)
-    sunat_sequence_number = fields.Integer(string="Correlativo SUNAT", copy=False)
-    sunat_message = fields.Char(string="Mensaje SUNAT", copy=False)
-    sunat_xml = fields.Text(string="XML SUNAT", copy=False)
-    sunat_cdr = fields.Text(string="CDR SUNAT", copy=False)
-    sunat_xml_filename = fields.Char(string="Nombre XML SUNAT", copy=False)
-    sunat_xml_file = fields.Binary(string="Archivo XML SUNAT", copy=False)
-    sunat_zip_filename = fields.Char(string="Nombre ZIP SUNAT", copy=False)
-    sunat_zip_file = fields.Binary(string="Archivo ZIP SUNAT", copy=False)
-
-    @api.depends("partner_id.vat")
-    def _compute_sunat_document_type(self):
-        for order in self:
-            partner = order.partner_id
-            vat = (partner.vat or "").strip() if partner else ""
-
-            if vat.isdigit() and len(vat) == 11:
-                order.sunat_document_type = "01"  # Factura
-            else:
-                order.sunat_document_type = "03"  # Boleta
-
-    def action_generate_sunat_xml(self):
-        for order in self:
-
-            partner = order.partner_id
-            company = order.company_id
-
-            company_ruc = company.vat or "00000000000"
-            company_name = company.name or "EMPRESA"
-
-            customer_doc = partner.vat or "00000000"
-            customer_name = partner.name or "Cliente"
-
-            if order.sunat_document_type == "01":
-                customer_doc_type = "6"
-            else:
-                customer_doc_type = "1"
-
-            # Serie y correlativo
-            serie, numero = order._get_sunat_series_and_number()
-            doc_id = f"{serie}-{numero}"
-
-            order.sunat_sequence_number = numero
-            order.sunat_document_number = doc_id
-
-            total_igv = 0.0
-            total_valor_venta = 0.0
-            lines_xml = ""
-
-            for i, line in enumerate(order.lines, start=1):
-
-                qty = line.qty
-                subtotal = round(line.price_subtotal, 2)
-                total = round(line.price_subtotal_incl, 2)
-
-                igv = round(total - subtotal, 2)
-                price_unit = round(total / qty, 2) if qty else 0.0
-                valor_unitario = round(subtotal / qty, 2) if qty else 0.0
-
-                total_igv += igv
-                total_valor_venta += subtotal
-
-            lines_xml += f"""
-    <cac:InvoiceLine>
-        <cbc:ID>{i}</cbc:ID>
-        <cbc:InvoicedQuantity unitCode="NIU">{qty}</cbc:InvoicedQuantity>
-        <cbc:LineExtensionAmount currencyID="PEN">{subtotal}</cbc:LineExtensionAmount>
-
-        <cac:PricingReference>
-            <cac:AlternativeConditionPrice>
-                <cbc:PriceAmount currencyID="PEN">{price_unit}</cbc:PriceAmount>
-                <cbc:PriceTypeCode>01</cbc:PriceTypeCode>
-            </cac:AlternativeConditionPrice>
-        </cac:PricingReference>
-
-        <cac:TaxTotal>
-            <cbc:TaxAmount currencyID="PEN">{igv}</cbc:TaxAmount>
-            <cac:TaxSubtotal>
-                <cbc:TaxAmount currencyID="PEN">{igv}</cbc:TaxAmount>
-                <cac:TaxCategory>
-                    <cbc:ID>10</cbc:ID>
-                    <cbc:Percent>18.00</cbc:Percent>
-                    <cac:TaxScheme>
-                        <cbc:ID>1000</cbc:ID>
-                        <cbc:Name>IGV</cbc:Name>
-                        <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
-                    </cac:TaxScheme>
-                </cac:TaxCategory>
-            </cac:TaxSubtotal>
-        </cac:TaxTotal>
-
-        <cac:Item>
-            <cbc:Description>{line.product_id.name}</cbc:Description>
-        </cac:Item>
-
-        <cac:Price>
-            <cbc:PriceAmount currencyID="PEN">{valor_unitario}</cbc:PriceAmount>
-        </cac:Price>
-    </cac:InvoiceLine>
-"""
-
-        total_igv = round(total_igv, 2)
-        total_valor_venta = round(total_valor_venta, 2)
-        total_pagar = round(order.amount_total, 2)
-
-        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
-        xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
-        xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
-        xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
-        xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">
-
-    <ext:UBLExtensions>
-        <ext:UBLExtension>
-            <ext:ExtensionContent>
-            </ext:ExtensionContent>
-        </ext:UBLExtension>
-    </ext:UBLExtensions>
-
-    <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
-    <cbc:CustomizationID>2.0</cbc:CustomizationID>
-    <cbc:ID>{doc_id}</cbc:ID>
-    <cbc:IssueDate>{order.date_order.date()}</cbc:IssueDate>
-    <cbc:InvoiceTypeCode>{order.sunat_document_type}</cbc:InvoiceTypeCode>
-    <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
-    <cbc:LineCountNumeric>{len(order.lines)}</cbc:LineCountNumeric>
-
-        <cac:Signature>
-        <cbc:ID>{doc_id}</cbc:ID>
-        <cac:SignatoryParty>
-            <cac:PartyIdentification>
-                <cbc:ID>{company_ruc}</cbc:ID>
-            </cac:PartyIdentification>
-            <cac:PartyName>
-                <cbc:Name>{company_name}</cbc:Name>
-            </cac:PartyName>
-        </cac:SignatoryParty>
-        <cac:DigitalSignatureAttachment>
-            <cac:ExternalReference>
-                <cbc:URI>#signatureKG</cbc:URI>
-            </cac:ExternalReference>
-        </cac:DigitalSignatureAttachment>
-    </cac:Signature>
-
-    <cac:AccountingSupplierParty>
-        <cac:Party>
-            <cac:PartyIdentification>
-                <cbc:ID schemeID="6">{company_ruc}</cbc:ID>
-            </cac:PartyIdentification>
-            <cac:PartyLegalEntity>
-                <cbc:RegistrationName>{company_name}</cbc:RegistrationName>
-            </cac:PartyLegalEntity>
-        </cac:Party>
-    </cac:AccountingSupplierParty>
-
-    <cac:AccountingCustomerParty>
-        <cac:Party>
-            <cac:PartyIdentification>
-                <cbc:ID schemeID="{customer_doc_type}">{customer_doc}</cbc:ID>
-            </cac:PartyIdentification>
-            <cac:PartyLegalEntity>
-                <cbc:RegistrationName>{customer_name}</cbc:RegistrationName>
-            </cac:PartyLegalEntity>
-        </cac:Party>
-    </cac:AccountingCustomerParty>
-
-    <cac:TaxTotal>
-        <cbc:TaxAmount currencyID="PEN">{total_igv}</cbc:TaxAmount>
-        <cac:TaxSubtotal>
-            <cbc:TaxAmount currencyID="PEN">{total_igv}</cbc:TaxAmount>
-            <cac:TaxCategory>
-                <cbc:ID>10</cbc:ID>
-                <cbc:Percent>18.00</cbc:Percent>
-                <cac:TaxScheme>
-                    <cbc:ID>1000</cbc:ID>
-                    <cbc:Name>IGV</cbc:Name>
-                    <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
-                </cac:TaxScheme>
-            </cac:TaxCategory>
-        </cac:TaxSubtotal>
-    </cac:TaxTotal>
-
-    <cac:LegalMonetaryTotal>
-        <cbc:LineExtensionAmount currencyID="PEN">{total_valor_venta}</cbc:LineExtensionAmount>
-        <cbc:PayableAmount currencyID="PEN">{total_pagar}</cbc:PayableAmount>
-    </cac:LegalMonetaryTotal>
-
-{lines_xml}
-</Invoice>
-"""
-        xml_signed = order._sign_xml_dummy(xml)
-
-        order.sunat_xml = xml_signed
-        order.sunat_xml_filename = f"{doc_id}.xml"
-        order.sunat_xml_file = base64.b64encode(xml_signed.encode("utf-8"))
-
-        # Crear ZIP en memoria
-        zip_buffer = io.BytesIO()
-
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            zip_file.writestr(f"{doc_id}.xml", xml_signed)
-        zip_buffer.seek(0)
-
-        order.sunat_zip_filename = f"{doc_id}.zip"
-        order.sunat_zip_file = base64.b64encode(zip_buffer.read())
-
-    def _get_sunat_series_and_number(self):
+    def get_liquidacion_data(self):
         self.ensure_one()
 
-        pos_config = self.session_id.config_id
+        orders = self.order_ids.filtered(lambda o: o.state in ["paid", "done"])
+        saldo_inicial = getattr(self, "cash_register_balance_start", 0.0) or 0.0
 
-        if self.sunat_document_type == "01":
-            serie = pos_config.sunat_serie_factura
-        else:
-            serie = pos_config.sunat_serie_boleta
-
-        if not serie:
-            raise UserError("Falta configurar la serie  SUNAT en este POS.")
-
-        domain = [
-            ("id", "!=", self.id),
-            ("sunat_document_type", "=", self.sunat_document_type),
-            ("session_id.config_id", "=", self.session_id.config_id.id),
-            ("sunat_sequence_number", ">", 0),
-        ]
-
-        last_order = self.search(domain, order="sunat_sequence_number desc", limit=1)
-        next_number = (last_order.sunat_sequence_number or 0) + 1
-
-        return serie, next_number
-
-    def _sign_xml_dummy(self, xml):
-        """
-        Simulación de firma (solo para pruebas)
-        """
-        signature = """
-    <ds:Signature Id="signatureKG">
-        <ds:SignedInfo>
-            <ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
-            <ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
-        </ds:SignedInfo>
-        <ds:SignatureValue>SIMULATED_SIGNATURE</ds:SignatureValue>
-    </ds:Signature>
-    """
-
-        return xml.replace(
-            "<ext:ExtensionContent>", f"<ext:ExtensionContent>{signature}"
-        )
-
-    def action_send_sunat(self):
-        for order in self:
-
-            if not order.sunat_zip_file:
-                raise UserError("Primero genera el XML y ZIP.")
-
-            zip_content = base64.b64decode(order.sunat_zip_file)
-
-            sunat_user = order.session_id.config_id.sunat_user
-            sunat_password = order.session_id.config_id.sunat_password
-            company_vat = order.company_id.vat or ""
-
-            if not company_vat:
-                raise UserError("La empresa no tiene RUC configurado.")
-
-            if not sunat_user:
-                raise UserError("Falta configurar el usuario SUNAT en este POS.")
-
-            if not sunat_password:
-                raise UserError("Falta configurar la clave SUNAT en este POS.")
-
-            username = company_vat + sunat_user
-            password = sunat_password
-
-            url = "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService"
-
-            soap_xml = f"""
-    <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                xmlns:ser="http://service.sunat.gob.pe">
-        <soapenv:Header/>
-        <soapenv:Body>
-            <ser:sendBill>
-                <fileName>{order.sunat_zip_filename}</fileName>
-                <contentFile>{base64.b64encode(zip_content).decode()}</contentFile>
-            </ser:sendBill>
-        </soapenv:Body>
-    </soapenv:Envelope>
-    """
-
-            response = requests.post(
-                url,
-                data=soap_xml,
-                headers={"Content-Type": "text/xml"},
-                auth=(username, password),
+        def safe_name(order):
+            return (
+                (order.partner_id.name or "").strip().lower()
+                if order.partner_id
+                else ""
             )
 
-            order.sunat_message = response.text
+        def has_ruc(order):
+            return (
+                order.partner_id
+                and order.partner_id.vat
+                and str(order.partner_id.vat).strip().isdigit()
+                and len(str(order.partner_id.vat).strip()) == 11
+            )
+
+        def is_cliente_generico(order):
+            return safe_name(order) in [
+                "cliente varios",
+                "varios",
+                "consumidor final",
+                "cliente final",
+            ]
+
+        def is_factura(order):
+            if getattr(order, "sunat_document_type", False) == "01":
+                return True
+            return has_ruc(order)
+
+        def is_boleta(order):
+            if getattr(order, "sunat_document_type", False) == "03":
+                return True
+            return bool(
+                order.partner_id
+                and not has_ruc(order)
+                and not is_cliente_generico(order)
+            )
+
+        def is_nota_venta(order):
+            return not is_factura(order) and not is_boleta(order)
+
+        def es_efectivo(payment):
+            nombre = (payment.payment_method_id.name or "").strip().lower()
+            return "efectivo" in nombre or "cash" in nombre
+
+        # =========================
+        # VENTAS POR TIPO Y MEDIO
+        # =========================
+        facturas_efectivo = 0.0
+        facturas_no_efectivo = 0.0
+
+        boletas_efectivo = 0.0
+        boletas_no_efectivo = 0.0
+
+        nota_venta_efectivo = 0.0
+        nota_venta_no_efectivo = 0.0
+
+        for order in orders:
+            if is_factura(order):
+                tipo_doc = "factura"
+            elif is_boleta(order):
+                tipo_doc = "boleta"
+            else:
+                tipo_doc = "nota"
+
+            for pay in order.payment_ids:
+                monto = pay.amount or 0.0
+
+                if es_efectivo(pay):
+                    if tipo_doc == "factura":
+                        facturas_efectivo += monto
+                    elif tipo_doc == "boleta":
+                        boletas_efectivo += monto
+                    else:
+                        nota_venta_efectivo += monto
+                else:
+                    if tipo_doc == "factura":
+                        facturas_no_efectivo += monto
+                    elif tipo_doc == "boleta":
+                        boletas_no_efectivo += monto
+                    else:
+                        nota_venta_no_efectivo += monto
+
+        total_facturas = facturas_efectivo + facturas_no_efectivo
+        total_boletas = boletas_efectivo + boletas_no_efectivo
+        total_nota_venta = nota_venta_efectivo + nota_venta_no_efectivo
+
+        total_ventas_efectivo = (
+            facturas_efectivo + boletas_efectivo + nota_venta_efectivo
+        )
+        total_ventas_no_efectivo = (
+            facturas_no_efectivo + boletas_no_efectivo + nota_venta_no_efectivo
+        )
+
+        total_ventas = total_ventas_efectivo + total_ventas_no_efectivo
+
+        # =========================
+        # MOVIMIENTOS DE CAJA
+        # =========================
+        cash_moves = self.statement_ids.line_ids.filtered(
+            lambda l: l.amount and l.amount != 0
+        )
+
+        def move_es_efectivo(line):
+            nombre = (line.payment_ref or line.ref or "").strip().lower()
+            # Ajusta esta lógica si en tus movimientos usas otros nombres
+            return not any(
+                x in nombre
+                for x in ["yape", "plin", "transferencia", "tarjeta", "cuenta"]
+            )
+
+        ingresos_adicionales_efectivo = [
+            {
+                "name": line.payment_ref or line.ref or "Ingreso efectivo",
+                "amount": line.amount,
+            }
+            for line in cash_moves
+            if line.amount > 0 and move_es_efectivo(line)
+        ]
+        total_ingresos_adicionales_efectivo = sum(
+            x["amount"] for x in ingresos_adicionales_efectivo
+        )
+
+        ingresos_adicionales_no_efectivo = [
+            {
+                "name": line.payment_ref or line.ref or "Ingreso no efectivo",
+                "amount": line.amount,
+            }
+            for line in cash_moves
+            if line.amount > 0 and not move_es_efectivo(line)
+        ]
+        total_ingresos_adicionales_no_efectivo = sum(
+            x["amount"] for x in ingresos_adicionales_no_efectivo
+        )
+
+        egresos_efectivo = [
+            {
+                "name": line.payment_ref or line.ref or "Egreso efectivo",
+                "amount": abs(line.amount),
+            }
+            for line in cash_moves
+            if line.amount < 0 and move_es_efectivo(line)
+        ]
+        total_egresos_efectivo = sum(x["amount"] for x in egresos_efectivo)
+
+        egresos_no_efectivo = [
+            {
+                "name": line.payment_ref or line.ref or "Egreso no efectivo",
+                "amount": abs(line.amount),
+            }
+            for line in cash_moves
+            if line.amount < 0 and not move_es_efectivo(line)
+        ]
+        total_egresos_no_efectivo = sum(x["amount"] for x in egresos_no_efectivo)
+
+        total_egresos = total_egresos_efectivo + total_egresos_no_efectivo
+
+        # =========================
+        # TOTALES REALES
+        # =========================
+        total_ingreso = (
+            saldo_inicial + total_ventas_efectivo + total_ingresos_adicionales_efectivo
+        )
+
+        saldo_en_caja = total_ingreso - total_egresos_efectivo
+
+        return {
+            "fecha": fields.Date.context_today(self).strftime("%d/%m/%Y"),
+            "hora": fields.Datetime.now().strftime("%H:%M:%S"),
+            "saldoAnterior": saldo_inicial,
+            # Ventas por tipo
+            "totalFacturas": total_facturas,
+            "totalBoletas": total_boletas,
+            "totalNotaVenta": total_nota_venta,
+            # Ventas por tipo y medio
+            "facturasEfectivo": facturas_efectivo,
+            "facturasNoEfectivo": facturas_no_efectivo,
+            "boletasEfectivo": boletas_efectivo,
+            "boletasNoEfectivo": boletas_no_efectivo,
+            "notaVentaEfectivo": nota_venta_efectivo,
+            "notaVentaNoEfectivo": nota_venta_no_efectivo,
+            # Totales ventas
+            "totalVentasEfectivo": total_ventas_efectivo,
+            "totalVentasNoEfectivo": total_ventas_no_efectivo,
+            "totalVentas": total_ventas,
+            # Otros ingresos
+            "ingresosAdicionalesEfectivo": ingresos_adicionales_efectivo,
+            "totalIngresosAdicionalesEfectivo": total_ingresos_adicionales_efectivo,
+            "ingresosAdicionalesNoEfectivo": ingresos_adicionales_no_efectivo,
+            "totalIngresosAdicionalesNoEfectivo": total_ingresos_adicionales_no_efectivo,
+            # Egresos
+            "egresosEfectivo": egresos_efectivo,
+            "totalEgresosEfectivo": total_egresos_efectivo,
+            "egresosNoEfectivo": egresos_no_efectivo,
+            "totalEgresosNoEfectivo": total_egresos_no_efectivo,
+            "totalEgresos": total_egresos,
+            # Totales caja
+            "totalIngreso": total_ingreso,
+            "saldoEnCaja": saldo_en_caja,
+        }
