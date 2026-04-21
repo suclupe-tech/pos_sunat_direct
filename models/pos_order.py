@@ -288,8 +288,21 @@ class PosOrder(models.Model):
 
             zip_content = base64.b64decode(order.sunat_zip_file)
 
-            username = order.company_id.vat + order.session_id.config_id.sunat_user
-            password = order.session_id.config_id.sunat_password
+            sunat_user = order.session_id.config_id.sunat_user
+            sunat_password = order.session_id.config_id.sunat_password
+            company_vat = order.company_id.vat or ""
+
+            if not company_vat:
+                raise UserError("La empresa no tiene RUC configurado.")
+
+            if not sunat_user:
+                raise UserError("Falta configurar el usuario SUNAT en este POS.")
+
+            if not sunat_password:
+                raise UserError("Falta configurar la clave SUNAT en este POS.")
+
+            username = company_vat + sunat_user
+            password = sunat_password
 
             url = "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService"
 
