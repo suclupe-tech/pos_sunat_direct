@@ -10,11 +10,15 @@
                     <field name="sunat_document_type" readonly="1"/>
                     <field name="sunat_document_number" readonly="1"/>
                     <field name="sunat_message" readonly="1"/>
-                    <field name="sunat_xml" readonly="1"/>
+                    <field name="sunat_xml" invisible="1"/>
                     <field name="sunat_xml_filename" readonly="1"/>
-                    <field name="sunat_xml_file" filename="sunat_xml_filename"/>
+                    <field name="sunat_xml_file" filename="sunat_xml_filename" reandoly="1"/>
                     <field name="sunat_zip_filename" readonly="1"/>
-                    <field name="sunat_zip_file" filename="sunat_zip_filename"/>
+                    <field name="sunat_zip_file" filename="sunat_zip_filename" reandoly="1"/>
+                    <field name="sunat_summary_filename" readonly="1"/>
+                    <field name="sunat_summary_file" filename="sunat_summary_filename" readonly="1"/>
+                    <field name="sunat_summary_xml" invisible="1"/>
+                    <field name="sunat_summary_id" readonly="1"/>
                 </group>
             </xpath>
             <xpath expr="//header" position="inside">
@@ -27,6 +31,11 @@
                         string="Enviar a SUNAT"
                         type="object"
                         class="btn-primary"/>
+
+                <button name="action_generate_summary_rc"
+                        string="Generar Resumen RC"
+                        type="object"
+                        class="btn-secondary"/>
             </xpath>
         </field>
     </record>

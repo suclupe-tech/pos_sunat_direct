@@ -40,6 +40,14 @@ class PosOrder(models.Model):
     sunat_xml_file = fields.Binary(string="Archivo XML SUNAT", copy=False)
     sunat_zip_filename = fields.Char(string="Nombre ZIP SUNAT", copy=False)
     sunat_zip_file = fields.Binary(string="Archivo ZIP SUNAT", copy=False)
+    sunat_summary_xml = fields.Text(string="XML Resumen SUNAT", copy=False)
+    sunat_summary_filename = fields.Char(string="Nombre Resumen SUNAT", copy=False)
+    sunat_summary_file = fields.Binary(string="Archivo Resumen SUNAT", copy=False)
+    sunat_summary_ticket = fields.Char(string="Ticket Resumen SUNAT", copy=False)
+    sunat_summary_sent = fields.Boolean(
+        string="Incluida en Resumen", default=False, copy=False
+    )
+    sunat_summary_id = fields.Char(string="Resumen SUNAT", copy=False)
 
     @api.depends("partner_id.vat")
     def _compute_sunat_document_type(self):
@@ -237,6 +245,8 @@ class PosOrder(models.Model):
         order.sunat_zip_filename = f"{doc_id}.zip"
         order.sunat_zip_file = base64.b64encode(zip_buffer.read())
 
+        order.sunat_state = "pending"
+
     def _get_sunat_series_and_number(self):
         self.ensure_one()
 
@@ -313,4 +323,207 @@ class PosOrder(models.Model):
                 auth=(username, password),
             )
 
+            if response.status_code == 200:
+                order.sunat_state = "sent"
+            else:
+                order.sunat_state = "error"
+
             order.sunat_message = response.text
+
+    def action_generate_summary_rc(self):
+        orders = self.search(
+            [
+                ("sunat_document_type", "=", "03"),
+                ("sunat_state", "=", "pending"),
+                ("sunat_summary_sent", "=", False),
+            ]
+        )
+
+        if not orders:
+            raise UserError("No hay boletas pendientes para el resumen diario.")
+
+        today = fields.Date.today()
+        fecha_emision = today.strftime("%Y-%m-%d")
+        fecha_id = today.strftime("%Y%m%d")
+
+        company = self.env.company
+        company_ruc = company.vat or "00000000000"
+        company_name = company.name or "EMPRESA"
+
+        # Correlativo simple del resumen
+        summary_id = f"RC-{fecha_id}-1"
+        file_name = f"{company_ruc}-{summary_id}"
+
+        total_importe = 0.0
+        total_igv = 0.0
+        lines_xml = ""
+
+        for i, order in enumerate(orders, start=1):
+            total = round(order.amount_total, 2)
+            gravada = round(sum(order.lines.mapped("price_subtotal")), 2)
+            igv = round(sum(order.lines.mapped("price_subtotal_incl")) - gravada, 2)
+
+            total_importe += total
+            total_igv += igv
+
+            numero = order.sunat_document_number or f"BBB1-{i}"
+
+            parts = numero.split("-")
+            serie = parts[0] if len(parts) > 0 else "BBB1"
+            correlativo = parts[1] if len(parts) > 1 else str(i)
+
+            lines_xml += f"""
+        <sac:SummaryDocumentsLine>
+            <cbc:LineID>{i}</cbc:LineID>
+            <cbc:DocumentTypeCode>03</cbc:DocumentTypeCode>
+            <cbc:ID>{serie}</cbc:ID>
+            <cbc:StartDocumentNumberID>{correlativo}</cbc:StartDocumentNumberID>
+            <cbc:EndDocumentNumberID>{correlativo}</cbc:EndDocumentNumberID>
+
+            <sac:TotalAmount currencyID="PEN">{total}</sac:TotalAmount>
+
+            <sac:BillingPayment>
+                <cbc:PaidAmount currencyID="PEN">{gravada}</cbc:PaidAmount>
+                <cbc:InstructionID>01</cbc:InstructionID>
+            </sac:BillingPayment>
+
+            <cac:TaxTotal>
+                <cbc:TaxAmount currencyID="PEN">{igv}</cbc:TaxAmount>
+                <cac:TaxSubtotal>
+                    <cbc:TaxAmount currencyID="PEN">{igv}</cbc:TaxAmount>
+                    <cac:TaxCategory>
+                        <cac:TaxScheme>
+                            <cbc:ID>1000</cbc:ID>
+                            <cbc:Name>IGV</cbc:Name>
+                            <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
+                        </cac:TaxScheme>
+                    </cac:TaxCategory>
+                </cac:TaxSubtotal>
+            </cac:TaxTotal>
+
+            <sac:Status>
+                <cbc:ConditionCode>1</cbc:ConditionCode>
+            </sac:Status>
+        </sac:SummaryDocumentsLine>
+    """
+
+        total_importe = round(total_importe, 2)
+        total_igv = round(total_igv, 2)
+
+        summary_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <SummaryDocuments               xmlns="urn:sunat:names:specification:ubl:peru:schema:xsd:SummaryDocuments-1"
+        xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+        xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+        xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+        xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
+        xmlns:sac="urn:sunat:names:specification:ubl:peru:schema:xsd:SunatAggregateComponents-1">
+
+        <ext:UBLExtensions>
+            <ext:UBLExtension>
+                <ext:ExtensionContent>
+                </ext:ExtensionContent>
+            </ext:UBLExtension>
+        </ext:UBLExtensions>
+
+        <cbc:UBLVersionID>2.0</cbc:UBLVersionID>
+        <cbc:CustomizationID>1.1</cbc:CustomizationID>
+        <cbc:ID>{summary_id}</cbc:ID>
+        <cbc:ReferenceDate>{fecha_emision}</cbc:ReferenceDate>
+        <cbc:IssueDate>{fecha_emision}</cbc:IssueDate>
+
+        <cac:Signature>
+            <cbc:ID>{file_name}</cbc:ID>
+            <cac:SignatoryParty>
+                    <cac:PartyIdentification>
+                    <cbc:ID>{company_ruc}</cbc:ID>
+                </cac:PartyIdentification>
+                <cac:PartyName>
+                    <cbc:Name>{company_name}</cbc:Name>
+                </cac:PartyName>
+            </cac:SignatoryParty>
+            <cac:DigitalSignatureAttachment>
+                <cac:ExternalReference>
+                    <cbc:URI>#signatureKG</cbc:URI>
+                </cac:ExternalReference>
+            </cac:DigitalSignatureAttachment>
+        </cac:Signature>
+
+        <cac:AccountingSupplierParty>
+            <cbc:CustomerAssignedAccountID>{company_ruc}</cbc:CustomerAssignedAccountID>
+            <cbc:AdditionalAccountID>6</cbc:AdditionalAccountID>
+            <cac:Party>
+                <cac:PartyLegalEntity>
+                    <cbc:RegistrationName>{company_name}</cbc:RegistrationName>
+                </cac:PartyLegalEntity>
+            </cac:Party>
+        </cac:AccountingSupplierParty>
+
+    {lines_xml}
+    </SummaryDocuments>
+    """
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr(f"{file_name}.xml", summary_xml)
+
+        zip_buffer.seek(0)
+
+        summary_file_data = base64.b64encode(zip_buffer.read())
+
+        orders.write(
+            {
+                "sunat_summary_sent": True,
+                "sunat_summary_id": summary_id,
+                "sunat_summary_filename": f"{file_name}.zip",
+                "sunat_summary_file": summary_file_data,
+                "sunat_summary_xml": summary_xml,
+            }
+        )
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Resumen diario generado",
+                "message": f"Se generó el resumen {summary_id} con {len(orders)} boleta(s).",
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_assign_sunat_number(self):
+        for order in self:
+
+            if order.sunat_document_number:
+                continue  # ya tiene número
+
+            serie, numero = order._get_sunat_series_and_number()
+
+            doc_id = f"{serie}-{numero}"
+
+            order.sunat_sequence_number = numero
+            order.sunat_document_number = doc_id
+            order.sunat_state = "pending"
+
+    def action_pos_order_paid(self):
+        res = super().action_pos_order_paid()
+
+        for order in self:
+            try:
+                # Si es boleta, solo asigna número y queda pendiente
+                if order.sunat_document_type == "03":
+                    order.action_assign_sunat_number()
+                    order.sunat_state = "pending"
+
+                # Si es factura, generar XML/ZIP y enviar automáticamente
+                elif order.sunat_document_type == "01":
+                    order.action_assign_sunat_number()
+                    order.action_generate_sunat_xml()
+                    order.action_send_sunat()
+
+            except Exception as e:
+                # No rompas la venta, solo registra el error
+                order.sunat_state = "error"
+                order.sunat_message = str(e)
+
+        return res
