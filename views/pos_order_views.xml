@@ -12,9 +12,9 @@
                     <field name="sunat_message" readonly="1"/>
                     <field name="sunat_xml" invisible="1"/>
                     <field name="sunat_xml_filename" readonly="1"/>
-                    <field name="sunat_xml_file" filename="sunat_xml_filename" reandoly="1"/>
+                    <field name="sunat_xml_file" filename="sunat_xml_filename" readonly="1"/>
                     <field name="sunat_zip_filename" readonly="1"/>
-                    <field name="sunat_zip_file" filename="sunat_zip_filename" reandoly="1"/>
+                    <field name="sunat_zip_file" filename="sunat_zip_filename" readonly="1"/>
                     <field name="sunat_summary_filename" readonly="1"/>
                     <field name="sunat_summary_file" filename="sunat_summary_filename" readonly="1"/>
                     <field name="sunat_summary_xml" invisible="1"/>
