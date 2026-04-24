@@ -13,6 +13,11 @@
                     <field name="sunat_password" password="True"/>
                     <field name="sunat_certificate_path"/>
                     <field name="sunat_certificate_password" password="True"/>
+
+                    <button name="action_test_certificate"
+            type="object"
+            string="Probar Certificado"
+            class="btn-primary"/>
                 </group>
             </xpath>
         </field>
