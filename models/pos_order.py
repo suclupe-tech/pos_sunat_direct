@@ -7,6 +7,8 @@ from .sunat_ubl_builder import SunatUBLBuilder
 from .sunat_signer import SunatSigner
 from .sunat_client import SunatClient
 from .sunat_cdr import SunatCDR
+from .sunat_summary_builder import SunatSummaryBuilder
+import re
 
 
 class PosOrder(models.Model):
@@ -34,6 +36,12 @@ class PosOrder(models.Model):
     sunat_summary_file = fields.Binary(string="Archivo Resumen", readonly=True)
     sunat_summary_xml = fields.Text(string="XML Resumen")
     sunat_summary_id = fields.Char(string="ID Resumen", readonly=True)
+
+    sunat_rc_batch_id = fields.Many2one(
+        "sunat.summary.batch",
+        string="Lote RC",
+        readonly=True,
+    )
 
     def _get_tipo_doc(self):
         self.ensure_one()
@@ -91,6 +99,7 @@ class PosOrder(models.Model):
                         "sunat_message": "XML firmado correctamente",
                         "sunat_xml": xml_signed,
                         "sunat_xml_filename": f"{nombre_cpe}.xml",
+                        "sunat_xml_file": base64.b64encode(xml_signed.encode("utf-8")),
                         "sunat_zip_filename": False,
                         "sunat_zip_file": False,
                     }
@@ -119,14 +128,21 @@ class PosOrder(models.Model):
                     mode="w",
                     compression=zipfile.ZIP_DEFLATED,
                 ) as zf:
+                    xml_filename = order.sunat_xml_filename
+
+                    if not xml_filename:
+                        raise Exception(
+                            "El XML no tiene nombre. Primero genera XML SUNAT nuevamente."
+                        )
+
                     zf.writestr(
-                        order.sunat_xml_filename,
+                        xml_filename,
                         order.sunat_xml,
                     )
 
                 zip_binary = base64.b64encode(mem_zip.getvalue())
 
-                zip_name = order.sunat_xml_filename.replace(
+                zip_name = xml_filename.replace(
                     ".xml",
                     ".zip",
                 )
@@ -189,9 +205,72 @@ class PosOrder(models.Model):
 
     def action_generate_summary_rc(self):
         for order in self:
-            order.write(
-                {
-                    "sunat_message": "Resumen RC pendiente",
-                }
-            )
+            try:
+                cfg = order.session_id.config_id
+
+                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(order)
+
+                rc_signed = SunatSigner.sign_xml(
+                    rc_xml,
+                    cfg.sunat_certificate_path,
+                    cfg.sunat_certificate_password,
+                )
+
+                zip_name = f"{order.company_id.vat}-{rc_id}.zip"
+
+                mem_zip = io.BytesIO()
+
+                with zipfile.ZipFile(
+                    mem_zip,
+                    mode="w",
+                    compression=zipfile.ZIP_DEFLATED,
+                ) as zf:
+                    zf.writestr(
+                        f"{order.company_id.vat}-{rc_id}.xml",
+                        rc_signed,
+                    )
+
+                zip_binary = base64.b64encode(mem_zip.getvalue())
+
+                username = f"{order.company_id.vat}{cfg.sunat_user}"
+
+                status_code, response_text = SunatClient.send_summary(
+                    cfg.sunat_mode,
+                    username,
+                    cfg.sunat_password,
+                    zip_name,
+                    zip_binary.decode(),
+                )
+
+                match = re.search(r"<ticket>(.*?)</ticket>", response_text)
+
+                if not match:
+                    raise Exception(f"Sin ticket SUNAT:\n{response_text[:2000]}")
+
+                ticket = match.group(1)
+
+                order.write(
+                    {
+                        "sunat_summary_id": ticket,
+                        "sunat_summary_filename": zip_name,
+                        "sunat_summary_file": zip_binary,
+                        "sunat_summary_xml": rc_signed,
+                        "sunat_state": "rc_enviado",
+                        "sunat_message": f"Resumen RC enviado. Ticket={ticket}",
+                    }
+                )
+
+            except Exception as e:
+                order.write(
+                    {
+                        "sunat_state": "error",
+                        "sunat_summary_filename": locals().get("zip_name", ""),
+                        "sunat_summary_file": locals().get("zip_binary", False),
+                        "sunat_summary_xml": locals().get(
+                            "rc_signed", locals().get("rc_xml", "")
+                        ),
+                        "sunat_message": f"Error Resumen RC: {str(e)}",
+                    }
+                )
+
         return True

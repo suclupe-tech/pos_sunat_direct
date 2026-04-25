@@ -46,3 +46,78 @@ xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-s
         )
 
         return response.status_code, response.text
+
+    @staticmethod
+    def send_summary(mode, username, password, filename, zip_base64):
+        url = SunatClient.get_url(mode)
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:ser="http://service.sunat.gob.pe"
+xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+<soapenv:Header>
+<wsse:Security>
+<wsse:UsernameToken>
+<wsse:Username>{username}</wsse:Username>
+<wsse:Password>{password}</wsse:Password>
+</wsse:UsernameToken>
+</wsse:Security>
+</soapenv:Header>
+<soapenv:Body>
+<ser:sendSummary>
+<fileName>{filename}</fileName>
+<contentFile>{zip_base64}</contentFile>
+</ser:sendSummary>
+</soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "",
+        }
+
+        response = requests.post(
+            url,
+            data=soap_body.encode("utf-8"),
+            headers=headers,
+            timeout=60,
+        )
+
+        return response.status_code, response.text
+
+    @staticmethod
+    def get_status(mode, username, password, ticket):
+        url = SunatClient.get_url(mode)
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:ser="http://service.sunat.gob.pe"
+xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+<soapenv:Header>
+<wsse:Security>
+<wsse:UsernameToken>
+<wsse:Username>{username}</wsse:Username>
+<wsse:Password>{password}</wsse:Password>
+</wsse:UsernameToken>
+</wsse:Security>
+</soapenv:Header>
+<soapenv:Body>
+<ser:getStatus>
+<ticket>{ticket}</ticket>
+</ser:getStatus>
+</soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "",
+        }
+
+        response = requests.post(
+            url,
+            data=soap_body.encode("utf-8"),
+            headers=headers,
+            timeout=60,
+        )
+
+        return response.status_code, response.text

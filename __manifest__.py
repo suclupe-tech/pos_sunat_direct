@@ -7,6 +7,7 @@
     "data": [
         "views/pos_config_views.xml",
         "views/pos_order_views.xml",
+        "views/sunat_summary_batch_views.xml",
         "data/sequence_data.xml",
     ],
     "installable": True,

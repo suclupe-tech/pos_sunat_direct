@@ -1,0 +1,62 @@
+<odoo>
+    <record id="view_sunat_summary_batch_form" model="ir.ui.view">
+        <field name="name">sunat.summary.batch.form</field>
+        <field name="model">sunat.summary.batch</field>
+        <field name="arch" type="xml">
+            <form string="Resumen RC SUNAT">
+
+                <header>
+                    <button name="action_load_pending_boletas"
+                            type="object"
+                            string="Cargar Boletas Pendientes"
+                            class="btn-primary"/>
+                </header>            
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="date"/>
+                        <field name="state"/>
+                        <field name="ticket"/>
+                    </group>
+
+                    <group string="Archivos">
+                        <field name="xml_filename"/>
+                        <field name="xml_file" filename="xml_filename"/>
+                        <field name="zip_filename"/>
+                        <field name="zip_file" filename="zip_filename"/>
+                    </group>
+
+                    <group string="Respuesta">
+                        <field name="response_message"/>
+                    </group>
+
+                    <field name="order_ids"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sunat_summary_batch_tree" model="ir.ui.view">
+        <field name="name">sunat.summary.batch.tree</field>
+        <field name="model">sunat.summary.batch</field>
+        <field name="arch" type="xml">
+            <list string="Resumenes RC SUNAT">
+                <field name="name"/>
+                <field name="date"/>
+                <field name="state"/>
+                <field name="ticket"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_sunat_summary_batch" model="ir.actions.act_window">
+        <field name="name">Resumenes RC SUNAT</field>
+        <field name="res_model">sunat.summary.batch</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_sunat_summary_batch"
+            name="Resumenes RC SUNAT"
+            action="action_sunat_summary_batch"
+            sequence="90"/>
+</odoo>
