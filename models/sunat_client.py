@@ -1,0 +1,48 @@
+import requests
+
+
+class SunatClient:
+
+    @staticmethod
+    def get_url(mode):
+        if mode == "beta":
+            return "https://e-beta.sunat.gob.pe/ol-ti-itcpfegem-beta/billService"
+        return "https://e-factura.sunat.gob.pe/ol-ti-itcpfegem/billService"
+
+    @staticmethod
+    def send_bill(mode, username, password, filename, zip_base64):
+        url = SunatClient.get_url(mode)
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:ser="http://service.sunat.gob.pe"
+xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+<soapenv:Header>
+<wsse:Security>
+<wsse:UsernameToken>
+<wsse:Username>{username}</wsse:Username>
+<wsse:Password>{password}</wsse:Password>
+</wsse:UsernameToken>
+</wsse:Security>
+</soapenv:Header>
+<soapenv:Body>
+<ser:sendBill>
+<fileName>{filename}</fileName>
+<contentFile>{zip_base64}</contentFile>
+</ser:sendBill>
+</soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "",
+        }
+
+        response = requests.post(
+            url,
+            data=soap_body.encode("utf-8"),
+            headers=headers,
+            timeout=60,
+        )
+
+        return response.status_code, response.text
