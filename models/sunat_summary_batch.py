@@ -36,21 +36,8 @@ class SunatSummaryBatch(models.Model):
     response_message = fields.Text(string="Respuesta SUNAT", readonly=True)
 
     def action_load_pending_boletas(self):
-        for batch in self:
-            orders = self.env["pos.order"].search(
-                [
-                    ("sunat_document_type", "=", "03"),
-                    ("sunat_state", "=", "aceptado"),
-                    ("sunat_rc_batch_id", "=", False),
-                    ("date_order", ">=", f"{batch.date} 00:00:00"),
-                    ("date_order", "<=", f"{batch.date} 23:59:59"),
-                ]
-            )
+        orders = self.env["pos.order"].search([], limit=10)
 
-            batch.write(
-                {
-                    "order_ids": [(6, 0, orders.ids)],
-                }
-            )
+        self.order_ids = [(6,0,orders.ids)]
 
         return True

@@ -9,6 +9,7 @@
         "views/pos_order_views.xml",
         "views/sunat_summary_batch_views.xml",
         "data/sequence_data.xml",
+        "security/ir.model.access.csv",
     ],
     "installable": True,
     "application": False,
