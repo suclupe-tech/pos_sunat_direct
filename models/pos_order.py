@@ -117,6 +117,15 @@ class PosOrder(models.Model):
 
     def action_send_sunat(self):
         for order in self:
+
+            if order.sunat_state == "aceptado":
+                order.write(
+                    {
+                        "sunat_message": "Documento ya fue aceptado por SUNAT. No se reenviará."
+                    }
+                )
+                continue
+
             try:
                 if not order.sunat_xml:
                     raise Exception("Primero genere XML SUNAT")
@@ -196,8 +205,8 @@ class PosOrder(models.Model):
             except Exception as e:
                 order.write(
                     {
-                        "sunat_state": "error",
-                        "sunat_message": f"Error envío SUNAT: {str(e)}",
+                        "sunat_state": "pendiente_envio",
+                        "sunat_message": f"Pendiente de envío: {str(e)}",
                     }
                 )
 
@@ -272,5 +281,14 @@ class PosOrder(models.Model):
                         "sunat_message": f"Error Resumen RC: {str(e)}",
                     }
                 )
+
+        return True
+
+    def action_send_pending_to_sunat(self):
+
+        pendientes = self.search([("sunat_state", "=", "pendiente_envio")])
+
+        for order in pendientes:
+            order.action_send_sunat()
 
         return True

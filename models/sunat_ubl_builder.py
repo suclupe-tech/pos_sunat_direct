@@ -127,6 +127,23 @@ class SunatUBLBuilder:
     <cbc:InvoiceTypeCode listID="0101" listAgencyName="PE:SUNAT" listName="Tipo de Documento" listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01">{tipo}</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
 
+    <cac:Signature>
+    <cbc:ID>{serie}-{correlativo}</cbc:ID>
+    <cac:SignatoryParty>
+        <cac:PartyIdentification>
+            <cbc:ID>{escape(order.company_id.vat or "")}</cbc:ID>
+        </cac:PartyIdentification>
+        <cac:PartyName>
+            <cbc:Name>{escape(order.company_id.name or "")}</cbc:Name>
+        </cac:PartyName>
+    </cac:SignatoryParty>
+    <cac:DigitalSignatureAttachment>
+        <cac:ExternalReference>
+            <cbc:URI>#signatureKG</cbc:URI>
+        </cac:ExternalReference>
+    </cac:DigitalSignatureAttachment>
+</cac:Signature>
+
     <cac:AccountingSupplierParty>
         <cac:Party>
             <cac:PartyIdentification>
@@ -151,6 +168,11 @@ class SunatUBLBuilder:
             </cac:PartyLegalEntity>
         </cac:Party>
     </cac:AccountingCustomerParty>
+
+    <cac:PaymentTerms>
+    <cbc:ID>FormaPago</cbc:ID>
+    <cbc:PaymentMeansID>Contado</cbc:PaymentMeansID>
+    </cac:PaymentTerms>
 
     <cac:TaxTotal>
         <cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>

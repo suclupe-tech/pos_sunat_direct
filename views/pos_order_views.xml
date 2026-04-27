@@ -35,6 +35,11 @@
                         type="object"
                         class="btn-primary"/>
 
+                <button name="action_send_pending_to_sunat"
+                        string="Enviar Pendientes"
+                        type="object"
+                        class="btn-secondary"/>
+
                 <button name="action_generate_summary_rc"
                         string="Generar Resumen RC"
                         type="object"
