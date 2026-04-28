@@ -217,7 +217,12 @@ class PosOrder(models.Model):
             try:
                 cfg = order.session_id.config_id
 
-                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(order)
+                orders = (
+                    order.sunat_rc_batch_id.order_ids
+                    if order.sunat_rc_batch_id
+                    else order
+                )
+                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(orders)
 
                 rc_signed = SunatSigner.sign_xml(
                     rc_xml,
@@ -292,3 +297,39 @@ class PosOrder(models.Model):
             order.action_send_sunat()
 
         return True
+
+    def _process_order(self, order, draft):
+        pos_order_id = super()._process_order(order, draft)
+        pos_order = self.browse(pos_order_id)
+
+        try:
+            if pos_order and pos_order.exists():
+                tipo = pos_order._get_tipo_doc()
+
+                if tipo == "01":
+                    if not pos_order.sunat_xml:
+                        pos_order.action_generate_sunat_xml()
+
+                    pos_order.action_send_sunat()
+
+                elif tipo == "03":
+                    if not pos_order.sunat_xml:
+                        pos_order.action_generate_sunat_xml()
+
+                    pos_order.write(
+                        {
+                            "sunat_state": "pendiente_resumen",
+                            "sunat_message": "Pendiente para envío por Resumen Diario",
+                        }
+                    )
+
+        except Exception as e:
+            if pos_order and pos_order.exists():
+                pos_order.write(
+                    {
+                        "sunat_state": "pendiente_envio",
+                        "sunat_message": f"Error auto envío: {str(e)}",
+                    }
+                )
+
+        return pos_order_id

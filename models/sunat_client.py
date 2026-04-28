@@ -121,3 +121,36 @@ xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-s
         )
 
         return response.status_code, response.text
+
+    def action_check_ticket(self):
+        for batch in self:
+
+            if not batch.ticket:
+                raise Exception("No existe ticket para consultar.")
+
+        first_order = batch.order_ids[0]
+        cfg = first_order.session_id.config_id
+
+        username = f"{first_order.company_id.vat}{cfg.sunat_user}"
+
+        status_code, response = SunatClient.get_status(
+            cfg.sunat_mode, username, cfg.sunat_password, batch.ticket
+        )
+
+        if (
+            "0 - La factura ha sido aceptada" in response
+            or "aceptad" in response.lower()
+        ):
+            batch.write({"state": "accepted", "response_message": response})
+
+            batch.order_ids.write(
+                {
+                    "sunat_state": "aceptado",
+                    "sunat_message": "Aceptado vía Resumen Diario",
+                }
+            )
+
+        else:
+            batch.write({"response_message": response})
+
+        return True

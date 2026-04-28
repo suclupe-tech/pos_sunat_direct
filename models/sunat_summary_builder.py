@@ -5,22 +5,79 @@ from xml.sax.saxutils import escape
 class SunatSummaryBuilder:
 
     @staticmethod
-    def build_rc_xml(order):
+    def build_rc_xml(orders):
+        if not orders:
+            raise Exception("No hay boletas para generar el resumen RC.")
+
         today = fields.Date.today()
         rc_id = f"RC-{today.strftime('%Y%m%d')}-001"
 
-        total = round(order.amount_total, 2)
-        subtotal = round(order.amount_total / 1.18, 2)
-        igv = round(total - subtotal, 2)
+        first_order = orders[0]
+        company_vat = escape(first_order.company_id.vat or "")
+        company_name = escape(first_order.company_id.name or "")
 
-        company_vat = escape(order.company_id.vat or "")
-        company_name = escape(order.company_id.name or "")
-        if not order.sunat_document_number:
-            raise Exception(
-                "La boleta no tiene número SUNAT. Reenvía la boleta primero."
-            )
+        lines_xml = ""
 
-        document_number = escape(order.sunat_document_number)
+        for i, order in enumerate(orders, start=1):
+            if not order.sunat_document_number:
+                raise Exception(f"La boleta {order.name} no tiene número SUNAT.")
+
+            total = round(order.amount_total, 2)
+            subtotal = round(order.amount_total / 1.18, 2)
+            igv = round(total - subtotal, 2)
+
+            document_number = escape(order.sunat_document_number)
+            serie, correlativo = document_number.split("-")
+
+            partner = order.partner_id
+            client_doc = escape(partner.vat or "00000000") if partner else "00000000"
+
+            if partner and partner.vat:
+                client_doc_type = "1" if len(partner.vat.strip()) == 8 else "0"
+            else:
+                client_doc_type = "0"
+
+            lines_xml += f"""
+<sac:SummaryDocumentsLine>
+<cbc:LineID>{i}</cbc:LineID>
+<cbc:DocumentTypeCode>03</cbc:DocumentTypeCode>
+<cbc:ID>{serie}-{correlativo}</cbc:ID>
+
+<cac:AccountingCustomerParty>
+<cbc:CustomerAssignedAccountID>{client_doc}</cbc:CustomerAssignedAccountID>
+<cbc:AdditionalAccountID>{client_doc_type}</cbc:AdditionalAccountID>
+</cac:AccountingCustomerParty>
+
+<cac:Status>
+<cbc:ConditionCode>1</cbc:ConditionCode>
+</cac:Status>
+
+<sac:TotalAmount currencyID="PEN">{total:.2f}</sac:TotalAmount>
+
+<sac:BillingPayment>
+<cbc:PaidAmount currencyID="PEN">{subtotal:.2f}</cbc:PaidAmount>
+<cbc:InstructionID>01</cbc:InstructionID>
+</sac:BillingPayment>
+
+<cac:TaxTotal>
+<cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
+<cac:TaxSubtotal>
+<cbc:TaxableAmount currencyID="PEN">{subtotal:.2f}</cbc:TaxableAmount>
+<cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
+<cac:TaxCategory>
+<cbc:ID>S</cbc:ID>
+<cbc:Percent>18.00</cbc:Percent>
+<cac:TaxScheme>
+<cbc:ID>1000</cbc:ID>
+<cbc:Name>IGV</cbc:Name>
+<cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
+</cac:TaxScheme>
+</cac:TaxCategory>
+</cac:TaxSubtotal>
+</cac:TaxTotal>
+
+</sac:SummaryDocumentsLine>
+"""
 
         xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <SummaryDocuments
@@ -64,32 +121,7 @@ xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponent
 </cac:PartyLegalEntity>
 </cac:Party>
 </cac:AccountingSupplierParty>
-<sac:SummaryDocumentsLine>
-<cbc:LineID>1</cbc:LineID>
-<cbc:DocumentTypeCode>03</cbc:DocumentTypeCode>
-<sac:DocumentSerialID>{document_number.split("-")[0]}</sac:DocumentSerialID>
-<sac:StartDocumentNumberID>{document_number.split("-")[1]}</sac:StartDocumentNumberID>
-<sac:EndDocumentNumberID>{document_number.split("-")[1]}</sac:EndDocumentNumberID>
-<sac:TotalAmount currencyID="PEN">{total:.2f}</sac:TotalAmount>
-<sac:BillingPayment>
-<cbc:PaidAmount currencyID="PEN">{subtotal:.2f}</cbc:PaidAmount>
-<cbc:InstructionID>01</cbc:InstructionID>
-</sac:BillingPayment>
-<cac:TaxTotal>
-<cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
-<cac:TaxSubtotal>
-<cbc:TaxableAmount currencyID="PEN">{subtotal:.2f}</cbc:TaxableAmount>
-<cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
-<cac:TaxCategory>
-<cac:TaxScheme>
-<cbc:ID>1000</cbc:ID>
-<cbc:Name>IGV</cbc:Name>
-<cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
-</cac:TaxScheme>
-</cac:TaxCategory>
-</cac:TaxSubtotal>
-</cac:TaxTotal>
-</sac:SummaryDocumentsLine>
+{lines_xml}
 </SummaryDocuments>
 """
         return rc_id, xml

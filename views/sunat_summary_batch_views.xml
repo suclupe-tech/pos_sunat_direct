@@ -10,6 +10,16 @@
                             type="object"
                             string="Cargar Boletas Pendientes"
                             class="btn-primary"/>
+
+                    <button name="action_send_summary"
+                            type="object"
+                            string="Enviar Resumen RC"
+                            class="btn-success"/>
+
+                    <button name="action_check_ticket"
+                            type="object"
+                            string="Consultar Ticket"
+                            class="btn-secondary"/>        
                 </header>            
                 <sheet>
                     <group>

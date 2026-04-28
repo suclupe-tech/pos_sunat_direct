@@ -1,19 +1,23 @@
 <odoo>
-    <record id="seq_sunat_factura" model="ir.sequence">
-        <field name="name">Secuencia Factura SUNAT</field>
-        <field name="code">sunat.factura</field>
-        <field name="prefix"></field>
-        <field name="padding">8</field>
-        <field name="number_increment">1</field>
-        <field name="number_next">1</field>
-    </record>
+    <data noupdate="1">
 
-    <record id="seq_sunat_boleta" model="ir.sequence">
-        <field name="name">Secuencia Boleta SUNAT</field>
-        <field name="code">sunat.boleta</field>
-        <field name="prefix"></field>
-        <field name="padding">8</field>
-        <field name="number_increment">1</field>
-        <field name="number_next">1</field>
-    </record>
+        <record id="seq_sunat_factura" model="ir.sequence">
+            <field name="name">Secuencia Factura SUNAT</field>
+            <field name="code">sunat.factura</field>
+            <field name="prefix"></field>
+            <field name="padding">8</field>
+            <field name="number_increment">1</field>
+            <field name="number_next">1</field>
+        </record>
+
+        <record id="seq_sunat_boleta" model="ir.sequence">
+            <field name="name">Secuencia Boleta SUNAT</field>
+            <field name="code">sunat.boleta</field>
+            <field name="prefix"></field>
+            <field name="padding">8</field>
+            <field name="number_increment">1</field>
+            <field name="number_next">1</field>
+        </record>
+
+    </data>
 </odoo>
