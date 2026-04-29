@@ -85,10 +85,12 @@ class PosOrder(models.Model):
                     correlativo,
                 )
 
+                cfg = order.session_id.config_id.sudo()
+
                 xml_signed = SunatSigner.sign_xml(
                     xml,
-                    order.session_id.config_id.sunat_certificate_path,
-                    order.session_id.config_id.sunat_certificate_password,
+                    cfg.sunat_certificate_path,
+                    cfg.sunat_certificate_password,
                 )
 
                 order.write(
