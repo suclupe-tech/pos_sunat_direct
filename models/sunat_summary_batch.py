@@ -191,7 +191,7 @@ class SunatSummaryBatch(models.Model):
                 batch.ticket,
             )
 
-            if "<statusCode>0</statusCode>" in response:
+            if "0</" in response:
 
                 batch.write(
                     {
