@@ -14,7 +14,11 @@ class SunatSummaryBatch(models.Model):
     _description = "Resumen Diario SUNAT RC"
 
     name = fields.Char(string="Nombre RC", readonly=True)
-    date = fields.Date(string="Fecha", default=fields.Date.context_today, required=True)
+    date = fields.Date(
+        string="Fecha",
+        default=fields.Date.context_today,
+        required=True,
+    )
 
     state = fields.Selection(
         [
@@ -45,9 +49,6 @@ class SunatSummaryBatch(models.Model):
 
     def action_load_pending_boletas(self):
         for batch in self:
-            date_from = f"{batch.date} 00:00:00"
-            date_to = f"{batch.date} 23:59:59"
-
             orders = self.env["pos.order"].search(
                 [
                     ("sunat_state", "=", "pendiente_resumen"),
@@ -63,6 +64,7 @@ class SunatSummaryBatch(models.Model):
 
     def action_send_summary(self):
         for batch in self:
+
             if not batch.order_ids:
                 batch.write(
                     {
@@ -76,7 +78,7 @@ class SunatSummaryBatch(models.Model):
                 rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(batch.order_ids)
 
                 first_order = batch.order_ids[0]
-                cfg = first_order.session_id.config_id
+                cfg = first_order.session_id.config_id.sudo()
                 company_vat = first_order.company_id.vat
 
                 signed_xml = SunatSigner.sign_xml(
@@ -105,7 +107,15 @@ class SunatSummaryBatch(models.Model):
                     zip_binary.decode(),
                 )
 
-                match = re.search(r"<(?:\w+:)?ticket>(.*?)</(?:\w+:)?ticket>", response)
+                match = re.search(
+                    r"<(?:\w+:)?ticket>(.*?)</(?:\w+:)?ticket>",
+                    response,
+                )
+
+                if not match and "ya fue presentado anteriormente" in response:
+                    m = re.search(r"valor:\s*'([^']+)'", response)
+                    if m:
+                        match = m
 
                 if not match:
                     batch.write(
@@ -132,7 +142,7 @@ class SunatSummaryBatch(models.Model):
                         "xml_filename": xml_name,
                         "zip_file": zip_binary,
                         "zip_filename": zip_name,
-                        "response_message": response,
+                        "response_message": "Resumen RC enviado. Ticket SUNAT recibido.",
                     }
                 )
 
@@ -140,7 +150,8 @@ class SunatSummaryBatch(models.Model):
                     {
                         "sunat_state": "rc_enviado",
                         "sunat_summary_id": ticket,
-                        "sunat_message": f"Incluido en Resumen Diario RC {rc_id}. Ticket SUNAT: {ticket}",
+                        "sunat_message": f"Incluido en Resumen Diario RC {rc_id}. "
+                        f"Ticket SUNAT: {ticket}",
                         "sunat_rc_batch_id": batch.id,
                     }
                 )
@@ -162,26 +173,32 @@ class SunatSummaryBatch(models.Model):
                 raise Exception("No existe ticket para consultar.")
 
             first_order = batch.order_ids[0]
-            cfg = first_order.session_id.config_id
+            cfg = first_order.session_id.config_id.sudo()
 
-            username = f"{first_order.company_id.vat}{cfg.sunat_user}"
+            username = f"{first_order.company_id.vat}" f"{cfg.sunat_user}"
 
             status_code, response = SunatClient.get_status(
-                cfg.sunat_mode, username, cfg.sunat_password, batch.ticket
+                cfg.sunat_mode,
+                username,
+                cfg.sunat_password,
+                batch.ticket,
             )
 
             if "<statusCode>0</statusCode>" in response:
+
                 batch.write(
                     {
                         "state": "accepted",
-                        "response_message": f"Resumen Diario aceptado por SUNAT. Ticket {batch.ticket}",
+                        "response_message": f"Resumen Diario aceptado por SUNAT. "
+                        f"Ticket {batch.ticket}",
                     }
                 )
 
                 batch.order_ids.write(
                     {
                         "sunat_state": "aceptado",
-                        "sunat_message": f"Aceptado vía Resumen Diario. Ticket {batch.ticket}",
+                        "sunat_message": f"Aceptado vía Resumen Diario. "
+                        f"Ticket {batch.ticket}",
                     }
                 )
 
