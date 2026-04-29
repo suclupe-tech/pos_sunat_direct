@@ -113,9 +113,16 @@ class SunatSummaryBatch(models.Model):
                 )
 
                 if not match and "ya fue presentado anteriormente" in response:
+                    m = re.search(r"valor:\s*&quot;([^&]+)&quot;", response)
+
+                    if not m:
+                        m = re.search(r"valor:\s*\"([^\"]+)\"", response)
+
+                if not m:
                     m = re.search(r"valor:\s*'([^']+)'", response)
-                    if m:
-                        match = m
+
+                if m:
+                    match = m
 
                 if not match:
                     batch.write(
