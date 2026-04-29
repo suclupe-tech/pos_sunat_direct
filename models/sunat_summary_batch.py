@@ -191,13 +191,15 @@ class SunatSummaryBatch(models.Model):
                 batch.ticket,
             )
 
-            if "0</" in response:
+            batch.write({"response_message": response[:2000]})
+
+            if "0</" in response or "statusCode>0<" in response:
 
                 batch.write(
                     {
                         "state": "accepted",
                         "response_message": f"Resumen Diario aceptado por SUNAT. "
-                        f"Ticket {batch.ticket}",
+                        f"Ticket {batch.ticket}\n\n{response[:1000]}",
                     }
                 )
 
@@ -208,8 +210,5 @@ class SunatSummaryBatch(models.Model):
                         f"Ticket {batch.ticket}",
                     }
                 )
-
-            else:
-                batch.write({"response_message": f"Respuesta SUNAT: {response[:500]}"})
 
         return True
