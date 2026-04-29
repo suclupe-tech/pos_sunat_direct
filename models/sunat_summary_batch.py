@@ -124,20 +124,18 @@ class SunatSummaryBatch(models.Model):
                     if m:
                         match = m
 
-                    if not match:
-                        batch.write(
-                            {
-                                "name": rc_id,
-                                "state": "error",
-                                "xml_file": base64.b64encode(
-                                    signed_xml.encode("utf-8")
-                                ),
-                                "xml_filename": xml_name,
-                                "zip_file": zip_binary,
-                                "zip_filename": zip_name,
-                                "response_message": f"HTTP {status_code}\n{response[:3000]}",
-                            }
-                        )
+                if not match:
+                    batch.write(
+                        {
+                            "name": rc_id,
+                            "state": "error",
+                            "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
+                            "xml_filename": xml_name,
+                            "zip_file": zip_binary,
+                            "zip_filename": zip_name,
+                            "response_message": f"HTTP {status_code}\n{response[:3000]}",
+                        }
+                    )
                     continue
 
                 ticket = match.group(1)
