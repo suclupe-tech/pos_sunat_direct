@@ -4,21 +4,25 @@
         <field name="model">pos.config</field>
         <field name="inherit_id" ref="point_of_sale.pos_config_view_form"/>
         <field name="arch" type="xml">
-            <xpath expr="//sheet" position="inside">
-                <group string="SUNAT Directo">
-                    <field name="sunat_mode"/>
-                    <field name="sunat_serie_factura"/>
-                    <field name="sunat_serie_boleta"/>
+            <xpath expr="//notebook" position="inside">
+                <page string="SUNAT">
+                    <group>
+                        <field name="sunat_mode"/>
+                        <field name="sunat_serie_factura"/>
+                        <field name="sunat_serie_boleta"/>
+                        <field name="sunat_sequence_factura_id"/>
+                    <field name="sunat_sequence_boleta_id"/>
                     <field name="sunat_user"/>
                     <field name="sunat_password" password="True"/>
                     <field name="sunat_certificate_path"/>
                     <field name="sunat_certificate_password" password="True"/>
 
                     <button name="action_test_certificate"
-            type="object"
-            string="Probar Certificado"
-            class="btn-primary"/>
+                            type="object"
+                            string="Probar Certificado"
+                            class="btn-primary"/>
                 </group>
+                </page>
             </xpath>
         </field>
     </record>

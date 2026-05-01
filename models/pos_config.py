@@ -16,15 +16,19 @@ class PosConfig(models.Model):
     )
     sunat_serie_factura = fields.Char(string="Serie Factura SUNAT")
     sunat_serie_boleta = fields.Char(string="Serie Boleta SUNAT")
+
+    sunat_sequence_factura_id = fields.Many2one(
+        "ir.sequence",
+        string="Secuencia Factura SUNAT",
+    )
+    sunat_sequence_boleta_id = fields.Many2one(
+        "ir.sequence",
+        string="Secuencia Boleta SUNAT",
+    )
     sunat_user = fields.Char(string="Usuario SUNAT")
     sunat_password = fields.Char(string="Clave SUNAT")
     sunat_certificate_path = fields.Char(string="Ruta Certificado")
     sunat_certificate_password = fields.Char(string="Clave Certificado")
-
-    class PosConfig(models.Model):
-        _inherit = "pos.config"
-
-    # (dejas tus campos como están)
 
     def action_test_certificate(self):
         self.ensure_one()

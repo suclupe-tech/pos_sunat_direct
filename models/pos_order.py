@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 import base64
 import io
 import zipfile
@@ -63,9 +63,18 @@ class PosOrder(models.Model):
     def _get_correlativo(self, tipo):
         self.ensure_one()
 
-        sequence_code = "sunat.factura" if tipo == "01" else "sunat.boleta"
+        cfg = self.session_id.config_id
 
-        return self.env["ir.sequence"].next_by_code(sequence_code)
+        sequence = (
+            cfg.sunat_sequence_factura_id
+            if tipo == "01"
+            else cfg.sunat_sequence_boleta_id
+        )
+
+        if not sequence:
+            raise Exception("Falta configurar la secuencia SUNAT en el punto de venta")
+
+        return sequence.next_by_id()
 
     def action_generate_sunat_xml(self):
         for order in self:
@@ -335,3 +344,41 @@ class PosOrder(models.Model):
                 )
 
         return pos_order_id
+
+    tipo_documento_reporte = fields.Selection(
+        [
+            ("factura", "Factura"),
+            ("boleta", "Boleta"),
+            ("nota_venta", "Nota de Venta"),
+        ],
+        string="Tipo Documento",
+        compute="_compute_tipo_documento_reporte",
+        store=True,
+    )
+
+    numero_documento_reporte = fields.Char(
+        string="Número Documento",
+        compute="_compute_tipo_documento_reporte",
+        store=True,
+    )
+
+    @api.depends(
+        "sunat_document_type", "sunat_document_number", "name", "pos_reference"
+    )
+    def _compute_tipo_documento_reporte(self):
+        for order in self:
+            if order.sunat_document_type == "01":
+                order.tipo_documento_reporte = "factura"
+                order.numero_documento_reporte = (
+                    order.sunat_document_number or order.name
+                )
+
+            elif order.sunat_document_type == "03":
+                order.tipo_documento_reporte = "boleta"
+                order.numero_documento_reporte = (
+                    order.sunat_document_number or order.name
+                )
+
+            else:
+                order.tipo_documento_reporte = "nota_venta"
+                order.numero_documento_reporte = order.pos_reference or order.name

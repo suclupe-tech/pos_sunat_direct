@@ -47,4 +47,38 @@
             </xpath>
         </field>
     </record>
+
+
+    <record id="view_pos_order_tree_documento_reporte" model="ir.ui.view">
+        <field name="name">pos.order.tree.documento.reporte</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="tipo_documento_reporte"/>
+                <field name="numero_documento_reporte"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_pos_order_search_documento_reporte" model="ir.ui.view">
+        <field name="name">pos.order.search.documento.reporte</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_filter"/>
+        <field name="arch" type="xml">
+            <xpath expr="//search" position="inside">
+                <separator/>
+
+                <filter string="Facturas"
+                        name="filter_facturas"
+                        domain="[('tipo_documento_reporte', '=', 'factura')]"/>
+                <filter string="Boletas"
+                        name="filter_boletas"
+                        domain="[('tipo_documento_reporte', '=', 'boleta')]"/>
+                <filter string="Notas de Ventas"
+                        name="filter_notas_ventas"
+                        domain="[('tipo_documento_reporte', '=', 'nota_venta')]"/>
+            </xpath>
+        </field>
+    </record>
 </odoo>
