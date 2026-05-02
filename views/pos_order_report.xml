@@ -1,0 +1,76 @@
+<odoo>
+    <record id="action_report_pos_sales_documentos" model="ir.actions.report">
+        <field name="name">Reporte Ventas POS</field>
+        <field name="model">pos.order</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">pos_sunat_direct.report_pos_sales_documentos</field>
+        <field name="report_file">pos_sunat_direct.report_pos_sales_documentos</field>
+        <field name="binding_model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="binding_type">report</field>
+    </record>
+
+
+    <template id="report_pos_sales_documentos">
+        <t t-call="web.html_container">
+            <t t-call="web.external_layout">
+                <div class="page">
+                <h2>Reporte de Ventas POS</h2>
+
+                <table class="table table-sm">
+                <thead>
+                    <tr>
+                    <th>Fecha</th>
+                    <th>Orden</th>
+                    <th>Cliente</th>
+                    <th>Tipo Doc.</th>
+                    <th>Numero Doc.</th>
+                    <th>Subtotal</th>
+                    <th>IGV</th>
+                    <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr t-foreach="docs" t-as="o">
+                    <td><span t-field="o.date_order"/></td>
+                    <td><span t-field="o.name"/></td>
+                    <td><span t-field="o.partner_id"/></td>
+                    <td><span t-field="o.tipo_documento_reporte"/></td>
+                    <td><span t-field="o.numero_documento_reporte"/></td>
+                    
+                    <td>
+                        <span t-esc="'%.2f' % (o.amount_total - o.amount_tax)"/>
+                        </td>
+                    <td>
+                        <span t-esc="'%.2f' % o.amount_tax"/>
+                        </td>
+
+                    <td>
+                        <span t-esc="'%.2f' % o.amount_total"/>
+                    </td>
+                    </tr>
+                </tbody>
+            </table>
+
+                    <br/>
+
+                    <h4>Totales</h4>
+
+                    <p>
+                        <strong>Subtotal generado:</strong>
+                        <span t-esc="'%.2f' % sum([(o.amount_total - o.amount_tax) for o in docs])"/>
+                    </p>
+
+                    <p>
+                        <strong>IGV generados:</strong>
+                        <span t-esc="'%.2f' % sum([o.amount_tax for o in docs])"/>
+                    </p>
+
+                    <p>
+                        <strong>Total generado:</strong>
+                        <span t-esc="'%.2f' % sum([o.amount_total for o in docs])"/>
+                    </p>    
+                </div>                
+            </t>
+        </t>
+    </template>
+</odoo>

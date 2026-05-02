@@ -15,7 +15,16 @@ class PosOrder(models.Model):
     _inherit = "pos.order"
 
     sunat_state = fields.Char(string="Estado SUNAT", readonly=True)
-    sunat_document_type = fields.Char(string="Tipo Documento SUNAT", readonly=True)
+    sunat_document_type = fields.Selection(
+        [
+            ("01", "Factura"),
+            ("03", "Boleta"),
+            ("NV", "Nota de Venta"),
+        ],
+        string="Tipo Documento SUNAT",
+        readonly=False,
+        default="03",
+    )
     sunat_document_number = fields.Char(string="Número Documento SUNAT", readonly=True)
     sunat_message = fields.Text(string="Mensaje SUNAT", readonly=True)
 
@@ -45,12 +54,9 @@ class PosOrder(models.Model):
 
     def _get_tipo_doc(self):
         self.ensure_one()
-        if (
-            self.partner_id
-            and self.partner_id.vat
-            and len(self.partner_id.vat.strip()) == 11
-        ):
-            return "01"
+        if self.sunat_document_type:
+            return self.sunat_document_type
+
         return "03"
 
     def _get_serie(self, tipo):
@@ -315,14 +321,27 @@ class PosOrder(models.Model):
 
         try:
             if pos_order and pos_order.exists():
+
                 tipo = pos_order._get_tipo_doc()
 
-                if tipo == "01":
+                # NOTA DE VENTA(No se envia a SUNAT)
+                if tipo == "NV":
+                    pos_order.write(
+                        {
+                            "sunat_state": "nota_venta",
+                            "sunat_message": "Nota de Venta - No se envía a SUNAT",
+                        }
+                    )
+                    return pos_order_id
+
+                # FACTURA (envío directo a SUNAT)
+                elif tipo == "01":
                     if not pos_order.sunat_xml:
                         pos_order.action_generate_sunat_xml()
 
                     pos_order.action_send_sunat()
 
+                # BOLETA (envío por Resumen Diario)
                 elif tipo == "03":
                     if not pos_order.sunat_xml:
                         pos_order.action_generate_sunat_xml()
@@ -382,3 +401,20 @@ class PosOrder(models.Model):
             else:
                 order.tipo_documento_reporte = "nota_venta"
                 order.numero_documento_reporte = order.pos_reference or order.name
+
+
+    @api.model
+    def _order_fields(self, ui_order):
+        vals = super()._order_fields(ui_order)
+
+        #Control seguro: solo aceptar valores validos
+        tipo = ui_order.get("sunat_document_type")
+
+        if tipo in ("01", "03", "NV"):
+
+            vals["sunat_document_type"] = tipo
+
+        else:
+            vals["sunat_document_type"] = "03"  # Default a Boleta
+
+        return vals

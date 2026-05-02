@@ -8,9 +8,16 @@
         "views/pos_config_views.xml",
         "views/pos_order_views.xml",
         "views/sunat_summary_batch_views.xml",
+        "views/pos_order_report.xml",
         "data/sequence_data.xml",
         "security/ir.model.access.csv",
     ],
+    "assets": {
+        "point_of_sale._assets_pos": [
+            "pos_sunat_direct/static/src/js/document_type_pos.js",
+            "pos_sunat_direct/static/src/xml/document_type_pos.xml",
+        ],
+    },
     "installable": True,
     "application": False,
 }
