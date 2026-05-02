@@ -37,26 +37,34 @@ patch(PosOrder.prototype, {
 
 patch(PaymentScreen.prototype, {
     setup() {
-        super.setup();
+        super.setup(...arguments);
 
-        this.state = useState({sunat_document_type: this.currentOrder.get_sunat_document_type(),});
+        this.sunatState = useState({
+            document_type: this.currentOrder.get_sunat_document_type(),
+        });
     },
     setDocumentType(type) {
-        this.state.sunat_document_type = type;
+
+        if (this.currentOrder.paymentlines.length > 0) {
+            this.dialog.add(AlertDialog, {
+                title: "No permitido",
+                body: "No puedes cambiar el tipo de documento después de iniciar el pago.",
+            });
+            return;
+        }
+
+        this.sunatState.document_type = type;
         this.currentOrder.set_sunat_document_type(type);
     },
-});
 
-patch(PaymentScreen.prototype, {
     async validateOrder(isForceValidate) {
         const order = this.currentOrder;
-        const tipo = this.currentOrder.get_sunat_document_type();
-        const cliente = this.currentOrder.getPartner();
-
+        const tipo = order.get_sunat_document_type();
+        const cliente = order.getPartner();
         // Bloquear FACTURACION INTERNA DE ODOO
         order.setToInvoice(false);
 
-        //validacion factura sunat
+        //Advertencia inmediata
         if (tipo === "01") {
             if (!cliente || !cliente.vat || cliente.vat.trim().length !== 11) {
                 this.dialog.add(AlertDialog, {
@@ -66,7 +74,6 @@ patch(PaymentScreen.prototype, {
                 return;
             }
         }
-
         return super.validateOrder(...arguments);
     },
 });

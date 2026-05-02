@@ -13,17 +13,20 @@
         <xpath expr="//div[contains(@class, 'payment-buttons')]" position="inside">
 
             <div class="mt-2 d-flex gap-2 flex-wrap">
-                <button class="btn btn-secondary"
+                <button class="btn"
+                        t-att-class="sunatState.document_type === '03' ? 'btn-primary' : 'btn-secondary'"
                         t-on-click="() => this.setDocumentType('03')">
                     Boleta
                 </button>
 
-                <button class="btn btn-secondary"
+                <button class="btn"
+                        t-att-class="sunatState.document_type === '01' ? 'btn-success' : 'btn-secondary'"
                         t-on-click="() => this.setDocumentType('01')">
                     Factura
                 </button>
 
-                <button class="btn btn-secondary"
+                <button class="btn"
+                        t-att-class="sunatState.document_type === 'NV' ? 'btn-warning' : 'btn-secondary'"
                         t-on-click="() => this.setDocumentType('NV')">
                     Nota de Venta
                 </button>
