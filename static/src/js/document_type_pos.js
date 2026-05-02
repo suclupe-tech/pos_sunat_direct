@@ -44,8 +44,11 @@ patch(PaymentScreen.prototype, {
         });
     },
     setDocumentType(type) {
+        const paymentlines = this.currentOrder.paymentlines
+            ? this.currentOrder.paymentlines()
+            : [];
 
-        if (this.currentOrder.paymentlines.length > 0) {
+        if (paymentlines.length > 0) {
             this.dialog.add(AlertDialog, {
                 title: "No permitido",
                 body: "No puedes cambiar el tipo de documento después de iniciar el pago.",

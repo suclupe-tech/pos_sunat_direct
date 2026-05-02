@@ -418,3 +418,5 @@ class PosOrder(models.Model):
             vals["sunat_document_type"] = "03"  # Default a Boleta
 
         return vals
+    
+    
