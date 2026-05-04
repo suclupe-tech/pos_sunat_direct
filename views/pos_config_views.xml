@@ -10,12 +10,17 @@
                         <field name="sunat_mode"/>
                         <field name="sunat_serie_factura"/>
                         <field name="sunat_serie_boleta"/>
+
+                        <field name="sunat_serie_nota_venta"/>
+                        <field name="sunat_sequence_nota_venta_id"/>
+
                         <field name="sunat_sequence_factura_id"/>
-                    <field name="sunat_sequence_boleta_id"/>
-                    <field name="sunat_user"/>
-                    <field name="sunat_password" password="True"/>
-                    <field name="sunat_certificate_path"/>
-                    <field name="sunat_certificate_password" password="True"/>
+                        <field name="sunat_sequence_boleta_id"/>
+                        
+                        <field name="sunat_user"/>
+                        <field name="sunat_password" password="True"/>
+                        <field name="sunat_certificate_path"/>
+                        <field name="sunat_certificate_password" password="True"/>
 
                     <button name="action_test_certificate"
                             type="object"

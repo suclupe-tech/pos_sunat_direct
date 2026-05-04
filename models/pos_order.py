@@ -326,9 +326,24 @@ class PosOrder(models.Model):
 
                 # NOTA DE VENTA(No se envia a SUNAT)
                 if tipo == "NV":
+                    cfg = pos_order.session_id.config_id
+                    if not cfg.sunat_serie_nota_venta:
+                        raise Exception(
+                            "Falta configurar la serie para Nota de Venta en el punto de venta"
+                        )
+
+                    if not cfg.sunat_sequence_nota_venta_id:
+                        raise Exception(
+                            "Falta configurar la secuencia para Nota de Venta en el punto de venta"
+                        )
+
+                    correlativo = cfg.sunat_sequence_nota_venta_id.next_by_id()
+
                     pos_order.write(
                         {
                             "sunat_state": "nota_venta",
+                            "sunat_document_type": "NV",
+                            "sunat_document_number": f"{cfg.sunat_serie_nota_venta}-{correlativo}",
                             "sunat_message": "Nota de Venta - No se envía a SUNAT",
                         }
                     )
@@ -402,12 +417,11 @@ class PosOrder(models.Model):
                 order.tipo_documento_reporte = "nota_venta"
                 order.numero_documento_reporte = order.pos_reference or order.name
 
-
     @api.model
     def _order_fields(self, ui_order):
         vals = super()._order_fields(ui_order)
 
-        #Control seguro: solo aceptar valores validos
+        # Control seguro: solo aceptar valores validos
         tipo = ui_order.get("sunat_document_type")
 
         if tipo in ("01", "03", "NV"):
@@ -418,5 +432,3 @@ class PosOrder(models.Model):
             vals["sunat_document_type"] = "03"  # Default a Boleta
 
         return vals
-    
-    

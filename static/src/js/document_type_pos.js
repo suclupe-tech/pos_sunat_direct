@@ -44,9 +44,11 @@ patch(PaymentScreen.prototype, {
         });
     },
     setDocumentType(type) {
-        const paymentlines = this.currentOrder.paymentlines
-            ? this.currentOrder.paymentlines()
-            : [];
+        const paymentlines = 
+            this.currentOrder.payment_ids ||
+            this.currentOrder.paymentlines ||
+            this.paymentLines ||
+            [];
 
         if (paymentlines.length > 0) {
             this.dialog.add(AlertDialog, {
