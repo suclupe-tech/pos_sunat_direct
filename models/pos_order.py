@@ -9,6 +9,7 @@ from .sunat_client import SunatClient
 from .sunat_cdr import SunatCDR
 from .sunat_summary_builder import SunatSummaryBuilder
 import re
+from odoo.exceptions import UserError
 
 
 class PosOrder(models.Model):
@@ -83,6 +84,10 @@ class PosOrder(models.Model):
         return sequence.next_by_id()
 
     def action_generate_sunat_xml(self):
+
+        if self.sunat_document_type == "NV":
+            raise Exception("Las Notas de Venta no generan XML SUNAT")
+
         for order in self:
             try:
                 tipo = order._get_tipo_doc()
@@ -133,6 +138,10 @@ class PosOrder(models.Model):
         return True
 
     def action_send_sunat(self):
+
+        if self.sunat_document_type == "NV":
+            raise Exception("Las Notas de Venta no se envían a SUNAT")
+
         for order in self:
 
             if order.sunat_state == "aceptado":
@@ -230,6 +239,10 @@ class PosOrder(models.Model):
         return True
 
     def action_generate_summary_rc(self):
+
+        if self.sunat_document_type == "NV":
+            raise Exception("Las Notas de Venta no se incluyen en Resumen Diario")
+
         for order in self:
             try:
                 cfg = order.session_id.config_id

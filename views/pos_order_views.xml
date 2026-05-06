@@ -28,22 +28,26 @@
                 <button name="action_generate_sunat_xml"
                         string="Generar XML SUNAT"
                         type="object"
-                        class="btn-secondary"/>
+                        class="btn-secondary"
+                        invisible="sunat_document_type == 'NV'"/>
                 
                 <button name="action_send_sunat"
                         string="Enviar a SUNAT"
                         type="object"
-                        class="btn-primary"/>
+                        class="btn-primary"
+                        invisible="sunat_document_type == 'NV'"/>
 
                 <button name="action_send_pending_to_sunat"
                         string="Enviar Pendientes"
                         type="object"
-                        class="btn-secondary"/>
+                        class="btn-secondary"
+                        invisible="sunat_document_type == 'NV'"/>
 
                 <button name="action_generate_summary_rc"
                         string="Generar Resumen RC"
                         type="object"
-                        class="btn-secondary"/>
+                        class="btn-secondary"
+                        invisible="sunat_document_type == 'NV'"/>
             </xpath>
         </field>
     </record>
@@ -55,8 +59,13 @@
         <field name="inherit_id" ref="point_of_sale.view_pos_order_tree"/>
         <field name="arch" type="xml">
             <xpath expr="//field[@name='partner_id']" position="after">
-                <field name="tipo_documento_reporte"/>
-                <field name="numero_documento_reporte"/>
+                <field name="tipo_documento_reporte"
+                        string="Tipo"/>
+                <field name="numero_documento_reporte"
+                        string="Número Documento"/>
+
+                <field name="sunat_state"
+                        string="Estado SUNAT"/>
             </xpath>
         </field>
     </record>
