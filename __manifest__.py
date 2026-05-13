@@ -11,6 +11,7 @@
         "views/pos_order_report.xml",
         "data/sequence_data.xml",
         "security/ir.model.access.csv",
+        "data/ir_cron.xml",
     ],
     "assets": {
         "point_of_sale._assets_pos": [

@@ -10,7 +10,26 @@ class SunatSummaryBuilder:
             raise Exception("No hay boletas para generar el resumen RC.")
 
         today = fields.Date.today()
-        rc_id = f"RC-{today.strftime('%Y%m%d')}-001"
+
+        env = orders.env
+
+        prefix = f"RC-{today.strftime('%Y%m%d')}-"
+
+        last_batch = env["sunat.summary.batch"].search(
+            [("name", "like", prefix)],
+            order="name desc",
+            limit=1,
+        )
+
+        sequence = 1
+
+        if last_batch and last_batch.name:
+            try:
+                sequence = int(last_batch.name.split("-")[-1]) + 1
+            except Exception:
+                sequence = 1
+
+        rc_id = f"{prefix}{sequence:03d}"
 
         first_order = orders[0]
         company_vat = escape(first_order.company_id.vat or "")

@@ -7,3 +7,5 @@ from . import sunat_cdr
 from . import sunat_client
 from . import sunat_summary_builder
 from . import sunat_summary_batch
+from . import sunat_summary_service
+from . import sunat_cron_service
