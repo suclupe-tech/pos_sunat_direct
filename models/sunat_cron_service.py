@@ -6,7 +6,6 @@ class SunatCronService(models.AbstractModel):
     _description = "Cron SUNAT POS"
 
     def cron_send_daily_boletas_rc(self):
-        today = fields.Date.context_today(self)
 
         orders = self.env["pos.order"].search(
             [
@@ -24,7 +23,11 @@ class SunatCronService(models.AbstractModel):
         for config in orders.mapped("config_id"):
             orders_config = orders.filtered(lambda o: o.config_id == config)
 
-            batch = self.env["sunat.summary.batch"].create({})
+            batch = self.env["sunat.summary.batch"].create(
+                {
+                    "date": fields.Date.context_today(self),
+                }
+            )
 
             batch.order_ids = [(6, 0, orders_config.ids)]
 

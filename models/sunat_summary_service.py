@@ -9,6 +9,21 @@ from .sunat_signer import SunatSigner
 from .sunat_client import SunatClient
 
 
+# =====================================================
+# OBSOLETO / DEPRECADO
+#
+# La lógica de Resumen Diario RC fue migrada a:
+# sunat_summary_batch.py
+#
+# Se mantiene temporalmente por compatibilidad y
+# para evitar romper referencias ocultas.
+#
+# Revisar referencias antes de eliminar:
+# - self.env["sunat.summary.service"]
+# - send_rc()
+#
+# Eliminar solo después de pruebas completas.
+# =====================================================
 class SunatSummaryService(models.AbstractModel):
     _name = "sunat.summary.service"
     _description = "Servicio Resumen Diario SUNAT"

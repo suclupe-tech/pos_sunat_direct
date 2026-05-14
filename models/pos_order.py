@@ -239,6 +239,7 @@ class PosOrder(models.Model):
         return True
 
     def action_generate_summary_rc(self):
+
         orders = self.filtered(
             lambda o: o.sunat_document_type == "03"
             and o.sunat_state not in ["rc_enviado", "aceptado", "anulado"]
@@ -248,9 +249,15 @@ class PosOrder(models.Model):
         )
 
         if not orders:
-            raise Exception("No hay boletas válidas para enviar en Resumen Diario.")
+            raise UserError("No hay boletas válidas para enviar.")
 
-        return self.env["sunat.summary.service"].send_rc(orders)
+        batch = self.env["sunat.summary.batch"].create({})
+
+        batch.order_ids = [(6, 0, orders.ids)]
+
+        batch.action_send_summary()
+
+        return True
 
     def action_send_pending_to_sunat(self):
 
