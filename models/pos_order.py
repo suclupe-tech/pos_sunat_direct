@@ -240,82 +240,22 @@ class PosOrder(models.Model):
 
     def action_generate_summary_rc(self):
 
-        if self.sunat_document_type == "NV":
-            raise Exception("Las Notas de Venta no se incluyen en Resumen Diario")
+        orders = self.filtered(
+            lambda o: o.sunat_document_type == "03"
+            and o.sunat_state not in ["rc_enviado", "aceptado", "anulado"]
+            and not getattr(o, "sunat_excluir_resumen", False)
+            and not getattr(o, "venta_anulada", False)
+            and not getattr(o, "es_reversa_anulacion", False)
+        )
 
-        for order in self:
-            try:
-                cfg = order.session_id.config_id
+        if not orders:
+            raise UserError("No hay boletas válidas para enviar.")
 
-                orders = (
-                    order.sunat_rc_batch_id.order_ids
-                    if order.sunat_rc_batch_id
-                    else order
-                )
-                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(orders)
+        batch = self.env["sunat.summary.batch"].create({})
 
-                rc_signed = SunatSigner.sign_xml(
-                    rc_xml,
-                    cfg.sunat_certificate_path,
-                    cfg.sunat_certificate_password,
-                )
+        batch.order_ids = [(6, 0, orders.ids)]
 
-                zip_name = f"{order.company_id.vat}-{rc_id}.zip"
-
-                mem_zip = io.BytesIO()
-
-                with zipfile.ZipFile(
-                    mem_zip,
-                    mode="w",
-                    compression=zipfile.ZIP_DEFLATED,
-                ) as zf:
-                    zf.writestr(
-                        f"{order.company_id.vat}-{rc_id}.xml",
-                        rc_signed,
-                    )
-
-                zip_binary = base64.b64encode(mem_zip.getvalue())
-
-                username = f"{order.company_id.vat}{cfg.sunat_user}"
-
-                status_code, response_text = SunatClient.send_summary(
-                    cfg.sunat_mode,
-                    username,
-                    cfg.sunat_password,
-                    zip_name,
-                    zip_binary.decode(),
-                )
-
-                match = re.search(r"<ticket>(.*?)</ticket>", response_text)
-
-                if not match:
-                    raise Exception(f"Sin ticket SUNAT:\n{response_text[:2000]}")
-
-                ticket = match.group(1)
-
-                order.write(
-                    {
-                        "sunat_summary_id": ticket,
-                        "sunat_summary_filename": zip_name,
-                        "sunat_summary_file": zip_binary,
-                        "sunat_summary_xml": rc_signed,
-                        "sunat_state": "rc_enviado",
-                        "sunat_message": f"Resumen RC enviado. Ticket={ticket}",
-                    }
-                )
-
-            except Exception as e:
-                order.write(
-                    {
-                        "sunat_state": "error",
-                        "sunat_summary_filename": locals().get("zip_name", ""),
-                        "sunat_summary_file": locals().get("zip_binary", False),
-                        "sunat_summary_xml": locals().get(
-                            "rc_signed", locals().get("rc_xml", "")
-                        ),
-                        "sunat_message": f"Error Resumen RC: {str(e)}",
-                    }
-                )
+        batch.action_send_summary()
 
         return True
 

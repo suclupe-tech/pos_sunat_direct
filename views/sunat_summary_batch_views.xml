@@ -4,23 +4,6 @@
         <field name="model">sunat.summary.batch</field>
         <field name="arch" type="xml">
             <form string="Resumen RC SUNAT">
-
-                <header>
-                    <button name="action_load_pending_boletas"
-                            type="object"
-                            string="Cargar Boletas Pendientes"
-                            class="btn-primary"/>
-
-                    <button name="action_send_summary"
-                            type="object"
-                            string="Enviar Resumen RC"
-                            class="btn-success"/>
-
-                    <button name="action_check_ticket"
-                            type="object"
-                            string="Consultar Ticket"
-                            class="btn-secondary"/>        
-                </header>            
                 <sheet>
                     <group>
                         <field name="name"/>

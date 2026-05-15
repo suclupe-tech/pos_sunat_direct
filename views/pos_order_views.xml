@@ -25,28 +25,10 @@
                 </group>
             </xpath>
             <xpath expr="//header" position="inside">
-                <button name="action_generate_sunat_xml"
-                        string="Generar XML SUNAT"
-                        type="object"
-                        class="btn-secondary"
-                        invisible="sunat_document_type == 'NV'"/>
-                
                 <button name="action_send_sunat"
                         string="Enviar a SUNAT"
                         type="object"
                         class="btn-primary"
-                        invisible="sunat_document_type == 'NV'"/>
-
-                <button name="action_send_pending_to_sunat"
-                        string="Enviar Pendientes"
-                        type="object"
-                        class="btn-secondary"
-                        invisible="sunat_document_type == 'NV'"/>
-
-                <button name="action_generate_summary_rc"
-                        string="Generar Resumen RC"
-                        type="object"
-                        class="btn-secondary"
                         invisible="sunat_document_type == 'NV'"/>
             </xpath>
         </field>

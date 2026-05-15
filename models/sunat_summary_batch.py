@@ -177,37 +177,68 @@ class SunatSummaryBatch(models.Model):
         for batch in self:
 
             if not batch.ticket:
-                raise Exception("No existe ticket para consultar.")
+                batch.write(
+                    {
+                        "response_message": "No existe ticket para consultar.",
+                    }
+                )
+                continue
+
+            if not batch.order_ids:
+                batch.write(
+                    {
+                        "response_message": "El resumen no tiene órdenes asociadas.",
+                    }
+                )
+                continue
 
             first_order = batch.order_ids[0]
             cfg = first_order.session_id.config_id.sudo()
 
-            username = f"{first_order.company_id.vat}" f"{cfg.sunat_user}"
+            username = f"{first_order.company_id.vat}{cfg.sunat_user}"
 
-            status_code, response = SunatClient.get_status(
-                cfg.sunat_mode,
-                username,
-                cfg.sunat_password,
-                batch.ticket,
+            try:
+                status_code, response = SunatClient.get_status(
+                    cfg.sunat_mode,
+                    username,
+                    cfg.sunat_password,
+                    batch.ticket,
+                )
+
+            except Exception as e:
+                batch.write(
+                    {
+                        "response_message": (
+                            "SUNAT aún procesa el resumen. "
+                            f"Se volverá a consultar automáticamente.\n\n{str(e)[:1000]}"
+                        ),
+                    }
+                )
+                continue
+
+            batch.write(
+                {
+                    "response_message": response[:2000],
+                }
             )
 
-            batch.write({"response_message": response[:2000]})
-
             if "0</" in response or "statusCode>0<" in response:
-
                 batch.write(
                     {
                         "state": "accepted",
-                        "response_message": f"Resumen Diario aceptado por SUNAT. "
-                        f"Ticket {batch.ticket}\n\n{response[:1000]}",
+                        "response_message": (
+                            f"Resumen Diario aceptado por SUNAT. "
+                            f"Ticket {batch.ticket}\n\n{response[:1000]}"
+                        ),
                     }
                 )
 
                 batch.order_ids.write(
                     {
                         "sunat_state": "aceptado",
-                        "sunat_message": f"Aceptado vía Resumen Diario. "
-                        f"Ticket {batch.ticket}",
+                        "sunat_message": (
+                            f"Aceptado vía Resumen Diario. Ticket {batch.ticket}"
+                        ),
                     }
                 )
 
