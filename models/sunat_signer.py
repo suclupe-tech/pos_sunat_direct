@@ -1,6 +1,6 @@
 import sys
 
-sys.path.insert(0, r"C:\odoo_libs")
+sys.path.insert(0, r"D:\odoo_libs")
 
 from lxml import etree
 from signxml.signer import XMLSigner
