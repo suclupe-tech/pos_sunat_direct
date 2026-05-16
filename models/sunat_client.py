@@ -117,7 +117,7 @@ xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-s
             url,
             data=soap_body.encode("utf-8"),
             headers=headers,
-            timeout=15,
+            timeout=60,
         )
 
         return response.status_code, response.text
