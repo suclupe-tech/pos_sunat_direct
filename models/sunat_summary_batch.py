@@ -178,9 +178,11 @@ class SunatSummaryBatch(models.Model):
         for batch in self:
 
             if not batch.ticket:
-                batch.write({
-                    "response_message": f"METODO NUEVO EJECUTADO\nHTTP {status_code}\n{response[:3000]}",
-                })
+                batch.write(
+                    {
+                        "response_message": "No existe ticket para consultar.",
+                    }
+                )
                 continue
 
             if not batch.order_ids:
@@ -299,14 +301,15 @@ class SunatSummaryBatch(models.Model):
                 if status_match:
                     status_code_sunat = status_match.group(1).strip()
 
-                    if status_code_sunat == "98":
+                    if status_code_sunat in ("98", "99"):
                         batch.write(
                             {
                                 "state": "sent",
                                 "response_message": (
                                     f"SUNAT aún está procesando el ticket {batch.ticket}. "
+                                    f"Código estado SUNAT: {status_code_sunat}. "
                                     "Volver a consultar en unos minutos.\n\n"
-                                    f"{response[:2000]}"
+                                    f"{response[:3000]}"
                                 ),
                             }
                         )
