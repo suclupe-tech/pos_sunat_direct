@@ -205,14 +205,93 @@ class SunatSummaryBatch(models.Model):
                     batch.ticket,
                 )
 
-                # Guardamos respuesta corta para auditoría
                 batch.write(
                     {
                         "response_message": f"HTTP {status_code}\n{response[:3000]}",
                     }
                 )
 
-                # Caso SUNAT aún procesando
+                # 1. Primero buscar CDR en <content>.
+                # SUNAT puede devolver statusCode 99 junto con content,
+                # y ese content es lo que realmente debemos leer.
+                content_match = re.search(
+                    r"<(?:\w+:)?content>(.*?)</(?:\w+:)?content>",
+                    response,
+                    re.DOTALL,
+                )
+
+                if content_match:
+                    cdr_zip_base64 = content_match.group(1).strip()
+                    cdr_zip_bytes = base64.b64decode(cdr_zip_base64)
+
+                    with zipfile.ZipFile(io.BytesIO(cdr_zip_bytes), "r") as zf:
+                        xml_names = [
+                            n for n in zf.namelist() if n.lower().endswith(".xml")
+                        ]
+
+                        if not xml_names:
+                            raise Exception("El CDR ZIP no contiene XML.")
+
+                        cdr_xml = zf.read(xml_names[0])
+                        root = ET.fromstring(cdr_xml)
+
+                        response_code_node = root.find(".//{*}ResponseCode")
+                        description_node = root.find(".//{*}Description")
+
+                        cdr_code = (
+                            response_code_node.text
+                            if response_code_node is not None
+                            else ""
+                        )
+                        cdr_description = (
+                            description_node.text
+                            if description_node is not None
+                            else ""
+                        )
+
+                    if cdr_code == "0":
+                        batch.write(
+                            {
+                                "state": "accepted",
+                                "response_message": (
+                                    f"Código CDR: {cdr_code}\n{cdr_description}"
+                                ),
+                            }
+                        )
+
+                        batch.order_ids.write(
+                            {
+                                "sunat_state": "aceptado",
+                                "sunat_message": (
+                                    f"Aceptado vía Resumen Diario {batch.name}. "
+                                    f"Código CDR: {cdr_code} - {cdr_description}"
+                                ),
+                            }
+                        )
+
+                    else:
+                        batch.write(
+                            {
+                                "state": "error",
+                                "response_message": (
+                                    f"Código CDR: {cdr_code}\n{cdr_description}"
+                                ),
+                            }
+                        )
+
+                        batch.order_ids.write(
+                            {
+                                "sunat_state": "error",
+                                "sunat_message": (
+                                    f"RC {batch.name} rechazado. "
+                                    f"Código CDR: {cdr_code} - {cdr_description}"
+                                ),
+                            }
+                        )
+
+                    continue
+
+                # 2. Si NO hay content, recién revisar statusCode.
                 status_match = re.search(
                     r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
                     response,
@@ -235,106 +314,48 @@ class SunatSummaryBatch(models.Model):
                         )
                         continue
 
-                    if status_code_sunat != "0":
-                        desc_match = re.search(
-                            r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
-                            response,
-                            re.DOTALL,
-                        )
-                        desc = (
-                            desc_match.group(1).strip()
-                            if desc_match
-                            else response[:1000]
-                        )
-
-                        batch.write(
-                            {
-                                "state": "error",
-                                "response_message": f"Ticket rechazado o con error: {status_code_sunat} - {desc}",
-                            }
-                        )
-
-                        batch.order_ids.write(
-                            {
-                                "sunat_state": "error",
-                                "sunat_message": f"Error en RC {batch.name}: {status_code_sunat} - {desc}",
-                            }
-                        )
-                        continue
-
-                # Caso correcto: SUNAT devuelve CDR en content Base64
-                match = re.search(
-                    r"<(?:\w+:)?content>(.*?)</(?:\w+:)?content>",
-                    response,
-                    re.DOTALL,
-                )
-
-                if not match:
-                    batch.write(
-                        {
-                            "state": "sent",
-                            "response_message": (
-                                "SUNAT respondió, pero no se encontró contenido CDR. "
-                                "Revisar respuesta completa:\n\n"
-                                f"{response[:3000]}"
-                            ),
-                        }
-                    )
-                    continue
-
-                cdr_zip_base64 = match.group(1).strip()
-                cdr_zip_bytes = base64.b64decode(cdr_zip_base64)
-
-                with zipfile.ZipFile(io.BytesIO(cdr_zip_bytes), "r") as zf:
-                    xml_names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
-
-                    if not xml_names:
-                        raise Exception("El CDR ZIP no contiene XML.")
-
-                    cdr_xml = zf.read(xml_names[0])
-                    root = ET.fromstring(cdr_xml)
-
-                    response_code_node = root.find(".//{*}ResponseCode")
-                    description_node = root.find(".//{*}Description")
-
-                    cdr_code = (
-                        response_code_node.text
-                        if response_code_node is not None
-                        else ""
-                    )
-                    cdr_description = (
-                        description_node.text if description_node is not None else ""
+                    desc_match = re.search(
+                        r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
+                        response,
+                        re.DOTALL,
                     )
 
-                if cdr_code == "0":
-                    batch.write(
-                        {
-                            "state": "accepted",
-                            "response_message": f"Código CDR: {cdr_code}\n{cdr_description}",
-                        }
+                    desc = (
+                        desc_match.group(1).strip() if desc_match else response[:1000]
                     )
 
-                    batch.order_ids.write(
-                        {
-                            "sunat_state": "aceptado",
-                            "sunat_message": f"Aceptado vía Resumen Diario {batch.name}. Código CDR: {cdr_code} - {cdr_description}",
-                        }
-                    )
-
-                else:
                     batch.write(
                         {
                             "state": "error",
-                            "response_message": f"Código CDR: {cdr_code}\n{cdr_description}",
+                            "response_message": (
+                                f"Ticket rechazado o con error: "
+                                f"{status_code_sunat} - {desc}"
+                            ),
                         }
                     )
 
                     batch.order_ids.write(
                         {
                             "sunat_state": "error",
-                            "sunat_message": f"RC {batch.name} rechazado. Código CDR: {cdr_code} - {cdr_description}",
+                            "sunat_message": (
+                                f"Error en RC {batch.name}: "
+                                f"{status_code_sunat} - {desc}"
+                            ),
                         }
                     )
+                    continue
+
+                # 3. Si no hay content ni statusCode, guardar respuesta para revisión.
+                batch.write(
+                    {
+                        "state": "sent",
+                        "response_message": (
+                            "SUNAT respondió, pero no se encontró CDR ni statusCode. "
+                            "Volver a consultar o revisar respuesta:\n\n"
+                            f"{response[:3000]}"
+                        ),
+                    }
+                )
 
             except Exception as e:
                 batch.write(
