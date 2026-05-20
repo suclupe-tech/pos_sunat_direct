@@ -141,7 +141,8 @@ class SunatUBLBuilder:
     <cbc:InvoiceTypeCode
     listAgencyName="PE:SUNAT"
     listName="Tipo de Documento"
-    listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01">{tipo}</cbc:InvoiceTypeCode>
+    listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01"
+    listID="0101">{tipo}</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
 
     <cac:Signature>
