@@ -92,13 +92,22 @@ class SunatUBLBuilder:
 
     @staticmethod
     def build_invoice_xml(order, tipo, serie, correlativo):
-        cliente = order.partner_id.name if order.partner_id else "Consumidor Final"
-        cliente_doc = (
-            order.partner_id.vat
-            if order.partner_id and order.partner_id.vat
-            else "00000000"
-        )
-        cliente_tipo_doc = "6" if tipo == "01" else "1"
+        # --- CORRECCIÓN DINÁMICA DE CLIENTE (CONFORME A SUNAT UBL 2.1) ---
+        partner = order.partner_id
+        vat_clean = partner.vat.strip() if partner and partner.vat else ""
+
+        if vat_clean and vat_clean != "00000000":
+            cliente = partner.name
+            cliente_doc = vat_clean
+            # Identificación dinámica basada en longitud si no usas l10n_latam_identification_type
+            cliente_tipo_doc = (
+                "6" if len(vat_clean) == 11 else "1" if len(vat_clean) == 8 else "0"
+            )
+        else:
+            # Caso Consumidor Final / Clientes Varios (Estándar UBL 2.1)
+            cliente = "VARIOS"
+            cliente_doc = "0"
+            cliente_tipo_doc = "0"
 
         valid_lines = order.lines.filtered(lambda l: l.qty and l.price_subtotal_incl)
 

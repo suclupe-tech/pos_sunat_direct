@@ -37,7 +37,6 @@ class SunatSummaryBuilder:
             )
 
         # Fecha de emisión del resumen.
-        # Para evitar error SUNAT 2236, no usamos una fecha posterior a la fecha de las boletas.
         issue_date = reference_date
 
         prefix = f"RC-{reference_date.strftime('%Y%m%d')}-"
@@ -68,19 +67,26 @@ class SunatSummaryBuilder:
             if not order.sunat_document_number:
                 raise Exception(f"La boleta {order.name} no tiene número SUNAT.")
 
+            # --- CORRECCIÓN DE REDONDEO ---
             total = round(order.amount_total, 2)
-            subtotal = round(order.amount_total / 1.18, 2)
+            subtotal = round(total / 1.18, 2)
             igv = round(total - subtotal, 2)
 
             document_number = escape(order.sunat_document_number)
             serie, correlativo = document_number.split("-")
 
+            # --- CORRECCIÓN DE CLIENTES VARIOS (DNI 00000000) ---
             partner = order.partner_id
-            client_doc = escape(partner.vat or "00000000") if partner else "00000000"
+            vat_clean = partner.vat.strip() if partner and partner.vat else ""
 
-            if partner and partner.vat:
-                client_doc_type = "1" if len(partner.vat.strip()) == 8 else "0"
+            if vat_clean and vat_clean != "00000000":
+                client_doc = escape(vat_clean)
+                client_doc_type = (
+                    "1" if len(vat_clean) == 8 else "6" if len(vat_clean) == 11 else "0"
+                )
             else:
+                # Si no hay cliente o es el comodín 00000000, se reporta como "Otros" sin documento
+                client_doc = "-"
                 client_doc_type = "0"
 
             lines_xml += f"""
