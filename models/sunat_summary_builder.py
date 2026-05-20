@@ -1,5 +1,6 @@
 from odoo import fields
 from xml.sax.saxutils import escape
+import pytz
 
 
 class SunatSummaryBuilder:
@@ -9,11 +10,37 @@ class SunatSummaryBuilder:
         if not orders:
             raise Exception("No hay boletas para generar el resumen RC.")
 
-        today = fields.Date.today()
-
         env = orders.env
 
-        prefix = f"RC-{today.strftime('%Y%m%d')}-"
+        # Fecha real de las boletas incluidas
+        tz_pe = pytz.timezone("America/Lima")
+
+        order_dates = []
+
+        for o in orders:
+            dt = fields.Datetime.to_datetime(o.date_order)
+
+            if dt.tzinfo is None:
+                dt = pytz.utc.localize(dt)
+
+            order_dates.append(dt.astimezone(tz_pe).date())
+
+        if not order_dates:
+            raise Exception("No se pudo determinar la fecha de las boletas.")
+
+        reference_date = min(order_dates)
+
+        # Seguridad: no mezclar boletas de días distintos en el mismo RC
+        if any(d != reference_date for d in order_dates):
+            raise Exception(
+                "No puedes generar un mismo Resumen Diario con boletas de fechas distintas."
+            )
+
+        # Fecha de emisión del resumen.
+        # Para evitar error SUNAT 2236, no usamos una fecha posterior a la fecha de las boletas.
+        issue_date = reference_date
+
+        prefix = f"RC-{reference_date.strftime('%Y%m%d')}-"
 
         last_batch = env["sunat.summary.batch"].search(
             [("name", "like", prefix)],
@@ -113,8 +140,8 @@ xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponent
 <cbc:UBLVersionID>2.0</cbc:UBLVersionID>
 <cbc:CustomizationID>1.1</cbc:CustomizationID>
 <cbc:ID>{rc_id}</cbc:ID>
-<cbc:ReferenceDate>{today}</cbc:ReferenceDate>
-<cbc:IssueDate>{today}</cbc:IssueDate>
+<cbc:ReferenceDate>{reference_date}</cbc:ReferenceDate>
+<cbc:IssueDate>{issue_date}</cbc:IssueDate>
 <cac:Signature>
 <cbc:ID>{rc_id}</cbc:ID>
 <cac:SignatoryParty>

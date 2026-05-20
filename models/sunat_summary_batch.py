@@ -7,6 +7,7 @@ import base64
 import io
 import zipfile
 import re
+import xml.etree.ElementTree as ET
 
 
 class SunatSummaryBatch(models.Model):
@@ -194,7 +195,6 @@ class SunatSummaryBatch(models.Model):
 
             first_order = batch.order_ids[0]
             cfg = first_order.session_id.config_id.sudo()
-
             username = f"{first_order.company_id.vat}{cfg.sunat_user}"
 
             try:
@@ -205,39 +205,144 @@ class SunatSummaryBatch(models.Model):
                     batch.ticket,
                 )
 
+                # Guardamos respuesta corta para auditoría
+                batch.write(
+                    {
+                        "response_message": f"HTTP {status_code}\n{response[:3000]}",
+                    }
+                )
+
+                # Caso SUNAT aún procesando
+                status_match = re.search(
+                    r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
+                    response,
+                    re.DOTALL,
+                )
+
+                if status_match:
+                    status_code_sunat = status_match.group(1).strip()
+
+                    if status_code_sunat == "98":
+                        batch.write(
+                            {
+                                "state": "sent",
+                                "response_message": (
+                                    f"SUNAT aún está procesando el ticket {batch.ticket}. "
+                                    "Volver a consultar en unos minutos.\n\n"
+                                    f"{response[:2000]}"
+                                ),
+                            }
+                        )
+                        continue
+
+                    if status_code_sunat != "0":
+                        desc_match = re.search(
+                            r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
+                            response,
+                            re.DOTALL,
+                        )
+                        desc = (
+                            desc_match.group(1).strip()
+                            if desc_match
+                            else response[:1000]
+                        )
+
+                        batch.write(
+                            {
+                                "state": "error",
+                                "response_message": f"Ticket rechazado o con error: {status_code_sunat} - {desc}",
+                            }
+                        )
+
+                        batch.order_ids.write(
+                            {
+                                "sunat_state": "error",
+                                "sunat_message": f"Error en RC {batch.name}: {status_code_sunat} - {desc}",
+                            }
+                        )
+                        continue
+
+                # Caso correcto: SUNAT devuelve CDR en content Base64
+                match = re.search(
+                    r"<(?:\w+:)?content>(.*?)</(?:\w+:)?content>",
+                    response,
+                    re.DOTALL,
+                )
+
+                if not match:
+                    batch.write(
+                        {
+                            "state": "sent",
+                            "response_message": (
+                                "SUNAT respondió, pero no se encontró contenido CDR. "
+                                "Revisar respuesta completa:\n\n"
+                                f"{response[:3000]}"
+                            ),
+                        }
+                    )
+                    continue
+
+                cdr_zip_base64 = match.group(1).strip()
+                cdr_zip_bytes = base64.b64decode(cdr_zip_base64)
+
+                with zipfile.ZipFile(io.BytesIO(cdr_zip_bytes), "r") as zf:
+                    xml_names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+
+                    if not xml_names:
+                        raise Exception("El CDR ZIP no contiene XML.")
+
+                    cdr_xml = zf.read(xml_names[0])
+                    root = ET.fromstring(cdr_xml)
+
+                    response_code_node = root.find(".//{*}ResponseCode")
+                    description_node = root.find(".//{*}Description")
+
+                    cdr_code = (
+                        response_code_node.text
+                        if response_code_node is not None
+                        else ""
+                    )
+                    cdr_description = (
+                        description_node.text if description_node is not None else ""
+                    )
+
+                if cdr_code == "0":
+                    batch.write(
+                        {
+                            "state": "accepted",
+                            "response_message": f"Código CDR: {cdr_code}\n{cdr_description}",
+                        }
+                    )
+
+                    batch.order_ids.write(
+                        {
+                            "sunat_state": "aceptado",
+                            "sunat_message": f"Aceptado vía Resumen Diario {batch.name}. Código CDR: {cdr_code} - {cdr_description}",
+                        }
+                    )
+
+                else:
+                    batch.write(
+                        {
+                            "state": "error",
+                            "response_message": f"Código CDR: {cdr_code}\n{cdr_description}",
+                        }
+                    )
+
+                    batch.order_ids.write(
+                        {
+                            "sunat_state": "error",
+                            "sunat_message": f"RC {batch.name} rechazado. Código CDR: {cdr_code} - {cdr_description}",
+                        }
+                    )
+
             except Exception as e:
                 batch.write(
                     {
+                        "state": "sent",
                         "response_message": (
-                            "SUNAT aún procesa el resumen. "
-                            f"Se volverá a consultar automáticamente.\n\n{str(e)[:1000]}"
-                        ),
-                    }
-                )
-                continue
-
-            batch.write(
-                {
-                    "response_message": response[:2000],
-                }
-            )
-
-            if "0</" in response or "statusCode>0<" in response:
-                batch.write(
-                    {
-                        "state": "accepted",
-                        "response_message": (
-                            f"Resumen Diario aceptado por SUNAT. "
-                            f"Ticket {batch.ticket}\n\n{response[:1000]}"
-                        ),
-                    }
-                )
-
-                batch.order_ids.write(
-                    {
-                        "sunat_state": "aceptado",
-                        "sunat_message": (
-                            f"Aceptado vía Resumen Diario. Ticket {batch.ticket}"
+                            f"No se pudo consultar/procesar el ticket {batch.ticket}. "
+                            f"Se puede volver a intentar.\n\nError: {str(e)}"
                         ),
                     }
                 )

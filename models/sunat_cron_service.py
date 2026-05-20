@@ -1,4 +1,5 @@
 from odoo import models, fields
+import pytz
 
 
 class SunatCronService(models.AbstractModel):
@@ -14,22 +15,38 @@ class SunatCronService(models.AbstractModel):
                 ("sunat_excluir_resumen", "!=", True),
                 ("venta_anulada", "!=", True),
                 ("es_reversa_anulacion", "!=", True),
+                ("sunat_rc_batch_id", "=", False),
             ]
         )
 
         if not orders:
             return True
 
-        for config in orders.mapped("config_id"):
-            orders_config = orders.filtered(lambda o: o.config_id == config)
+        grupos = {}
 
+        tz_pe = pytz.timezone("America/Lima")
+
+        for order in orders:
+            dt = fields.Datetime.to_datetime(order.date_order)
+
+            if dt.tzinfo is None:
+                dt = pytz.utc.localize(dt)
+
+            fecha_peru = dt.astimezone(tz_pe).date()
+
+            key = (order.config_id.id, fecha_peru)
+
+            grupos.setdefault(key, self.env["pos.order"])
+            grupos[key] |= order
+
+        for (config_id, fecha_peru), orders_group in grupos.items():
             batch = self.env["sunat.summary.batch"].create(
                 {
-                    "date": fields.Date.context_today(self),
+                    "date": fecha_peru,
                 }
             )
 
-            batch.order_ids = [(6, 0, orders_config.ids)]
+            batch.order_ids = [(6, 0, orders_group.ids)]
 
             batch.action_send_summary()
 

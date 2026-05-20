@@ -108,6 +108,8 @@ class SunatUBLBuilder:
 
         invoice_lines_xml = SunatUBLBuilder._build_invoice_lines(order)
 
+        issue_date = fields.Datetime.context_timestamp(order, order.date_order).date()
+
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
             xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -121,10 +123,16 @@ class SunatUBLBuilder:
 
     <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
     <cbc:CustomizationID>2.0</cbc:CustomizationID>
-    <cbc:ProfileID>0101</cbc:ProfileID>
+    <cbc:ProfileID
+        schemeName="SUNAT:Identificador de Tipo de Operación"
+        schemeAgencyName="PE:SUNAT"
+        schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo17">0101</cbc:ProfileID>
     <cbc:ID>{serie}-{correlativo}</cbc:ID>
-    <cbc:IssueDate>{fields.Date.today()}</cbc:IssueDate>
-    <cbc:InvoiceTypeCode listID="0101" listAgencyName="PE:SUNAT" listName="Tipo de Documento" listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01">{tipo}</cbc:InvoiceTypeCode>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:InvoiceTypeCode
+    listAgencyName="PE:SUNAT"
+    listName="Tipo de Documento"
+    listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01">{tipo}</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
 
     <cac:Signature>

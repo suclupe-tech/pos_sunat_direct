@@ -55,6 +55,8 @@ class SunatSigner:
         extension_content = signed_root.find(".//ext:ExtensionContent", namespaces=ns)
 
         if signature is not None and extension_content is not None:
+            signature.set("Id", "signatureKG")
+
             signature.getparent().remove(signature)
             extension_content.append(signature)
 
