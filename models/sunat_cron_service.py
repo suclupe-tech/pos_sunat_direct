@@ -39,7 +39,9 @@ class SunatCronService(models.AbstractModel):
             grupos.setdefault(key, self.env["pos.order"])
             grupos[key] |= order
 
-        for (config_id, fecha_peru), orders_group in grupos.items():
+        for (config_id, fecha_peru), orders_group in sorted(
+            grupos.items(), key=lambda x: x[0][1]
+        ):
             batch = self.env["sunat.summary.batch"].create(
                 {
                     "date": fecha_peru,
