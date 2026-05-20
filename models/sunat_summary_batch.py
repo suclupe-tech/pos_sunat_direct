@@ -178,11 +178,9 @@ class SunatSummaryBatch(models.Model):
         for batch in self:
 
             if not batch.ticket:
-                batch.write(
-                    {
-                        "response_message": "No existe ticket para consultar.",
-                    }
-                )
+                batch.write({
+                    "response_message": f"METODO NUEVO EJECUTADO\nHTTP {status_code}\n{response[:3000]}",
+                })
                 continue
 
             if not batch.order_ids:
