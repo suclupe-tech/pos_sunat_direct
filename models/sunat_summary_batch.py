@@ -327,20 +327,12 @@ class SunatSummaryBatch(models.Model):
 
                     batch.write(
                         {
-                            "state": "error",
+                            "state": "sent",
                             "response_message": (
-                                f"Ticket rechazado o con error: "
-                                f"{status_code_sunat} - {desc}"
-                            ),
-                        }
-                    )
-
-                    batch.order_ids.write(
-                        {
-                            "sunat_state": "error",
-                            "sunat_message": (
-                                f"Error en RC {batch.name}: "
-                                f"{status_code_sunat} - {desc}"
+                                f"SUNAT respondió con estado {status_code_sunat}. "
+                                "No se marcará como error automático. "
+                                "Volver a consultar el ticket.\n\n"
+                                f"{response[:3000]}"
                             ),
                         }
                     )
