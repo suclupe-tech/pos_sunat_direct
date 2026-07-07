@@ -7,7 +7,12 @@ class PosSession(models.Model):
     def get_liquidacion_data(self):
         self.ensure_one()
 
-        orders = self.order_ids.filtered(lambda o: o.state in ["paid", "done"])
+        orders_ventas = self.order_ids.filtered(
+            lambda o: o.state in ["paid", "done"]
+            and not getattr(o, "es_reversa_anulacion", False)
+        )
+
+        orders_caja = self.order_ids.filtered(lambda o: o.state in ["paid", "done"])
         saldo_inicial = getattr(self, "cash_register_balance_start", 0.0) or 0.0
 
         def safe_name(order):
@@ -66,7 +71,7 @@ class PosSession(models.Model):
         nota_venta_efectivo = 0.0
         nota_venta_no_efectivo = 0.0
 
-        for order in orders:
+        for order in orders_ventas:
             if is_factura(order):
                 tipo_doc = "factura"
             elif is_boleta(order):
@@ -106,11 +111,70 @@ class PosSession(models.Model):
         total_ventas = total_ventas_efectivo + total_ventas_no_efectivo
 
         # =========================
-        # MOVIMIENTOS DE CAJA
+        # CAJA REAL POR MEDIO DE PAGO
+        # Incluye ventas normales y reversas/anulaciones
         # =========================
-        cash_moves = self.statement_ids.line_ids.filtered(
-            lambda l: l.amount and l.amount != 0
-        )
+        total_caja_efectivo = 0.0
+        total_caja_no_efectivo = 0.0
+
+        total_anulaciones_efectivo = 0.0
+        total_anulaciones_no_efectivo = 0.0
+
+        medios_pago_no_efectivo_dict = {}
+
+        for order in orders_caja:
+            es_reversa = getattr(order, "es_reversa_anulacion", False)
+
+            for pay in order.payment_ids:
+                monto = pay.amount or 0.0
+
+                if es_efectivo(pay):
+                    total_caja_efectivo += monto
+
+                    if es_reversa or monto < 0:
+                        total_anulaciones_efectivo += abs(monto)
+                else:
+                    total_caja_no_efectivo += monto
+
+                    nombre_medio = pay.payment_method_id.name or "Sin método"
+
+                    if nombre_medio not in medios_pago_no_efectivo_dict:
+                        medios_pago_no_efectivo_dict[nombre_medio] = 0.0
+
+                    medios_pago_no_efectivo_dict[nombre_medio] += monto
+
+                    if es_reversa or monto < 0:
+                        total_anulaciones_no_efectivo += abs(monto)
+
+        total_caja_real = total_caja_efectivo + total_caja_no_efectivo
+        total_anulaciones = total_anulaciones_efectivo + total_anulaciones_no_efectivo
+
+        medios_pago_no_efectivo = [
+            {
+                "name": name,
+                "amount": amount,
+                "detalle": "",
+            }
+            for name, amount in medios_pago_no_efectivo_dict.items()
+        ]
+
+        # =========================
+        # MOVIMIENTOS DE CAJA
+        # Compatible con Odoo 19
+        # =========================
+        if "statement_line_ids" in self._fields:
+            cash_moves = self.statement_line_ids.filtered(
+                lambda l: l.amount and l.amount != 0
+            )
+        elif "pos_session_id" in self.env["account.bank.statement.line"]._fields:
+            cash_moves = self.env["account.bank.statement.line"].search(
+                [
+                    ("pos_session_id", "=", self.id),
+                    ("amount", "!=", 0),
+                ]
+            )
+        else:
+            cash_moves = self.env["account.bank.statement.line"]
 
         def move_es_efectivo(line):
             nombre = (line.payment_ref or line.ref or "").strip().lower()
@@ -170,14 +234,39 @@ class PosSession(models.Model):
         # TOTALES REALES
         # =========================
         total_ingreso = (
-            saldo_inicial + total_ventas_efectivo + total_ingresos_adicionales_efectivo
+            saldo_inicial + total_caja_efectivo + total_ingresos_adicionales_efectivo
         )
 
         saldo_en_caja = total_ingreso - total_egresos_efectivo
 
+        # =========================
+        # FECHA Y HORA DEL REPORTE
+        # Si la sesión ya cerró, usa la fecha/hora de cierre.
+        # Si aún está abierta, usa la fecha/hora actual.
+        # =========================
+        fecha_base = (
+            self.stop_at or self.write_date or self.start_at or fields.Datetime.now()
+        )
+
+        fecha_base_local = fields.Datetime.context_timestamp(self, fecha_base)
+
+        hora_apertura = "-"
+        if self.start_at:
+            hora_apertura = fields.Datetime.context_timestamp(
+                self, self.start_at
+            ).strftime("%H:%M:%S")
+
+        hora_cierre = "-"
+        if self.stop_at:
+            hora_cierre = fields.Datetime.context_timestamp(
+                self, self.stop_at
+            ).strftime("%H:%M:%S")
+
         return {
-            "fecha": fields.Date.context_today(self).strftime("%d/%m/%Y"),
-            "hora": fields.Datetime.now().strftime("%H:%M:%S"),
+            "fecha": fecha_base_local.strftime("%d/%m/%Y"),
+            "hora": fecha_base_local.strftime("%H:%M:%S"),
+            "horaApertura": hora_apertura,
+            "horaCierre": hora_cierre,
             "saldoAnterior": saldo_inicial,
             # Ventas por tipo
             "totalFacturas": total_facturas,
@@ -194,6 +283,15 @@ class PosSession(models.Model):
             "totalVentasEfectivo": total_ventas_efectivo,
             "totalVentasNoEfectivo": total_ventas_no_efectivo,
             "totalVentas": total_ventas,
+            # Caja real con anulaciones
+            "totalCajaEfectivo": total_caja_efectivo,
+            "totalCajaNoEfectivo": total_caja_no_efectivo,
+            "totalCajaReal": total_caja_real,
+            "totalAnulacionesEfectivo": total_anulaciones_efectivo,
+            "totalAnulacionesNoEfectivo": total_anulaciones_no_efectivo,
+            "totalAnulaciones": total_anulaciones,
+            "mediosPagoNoEfectivo": medios_pago_no_efectivo,
+            "totalMediosPagoNoEfectivo": total_caja_no_efectivo,
             # Otros ingresos
             "ingresosAdicionalesEfectivo": ingresos_adicionales_efectivo,
             "totalIngresosAdicionalesEfectivo": total_ingresos_adicionales_efectivo,
@@ -209,5 +307,3 @@ class PosSession(models.Model):
             "totalIngreso": total_ingreso,
             "saldoEnCaja": saldo_en_caja,
         }
-
-

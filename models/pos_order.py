@@ -53,6 +53,14 @@ class PosOrder(models.Model):
         readonly=True,
     )
 
+    def action_print_comprobante_a4_html(self):
+        self.ensure_one()
+        return {
+            "type": "ir.actions.act_url",
+            "url": "/pos_ticket_textil/comprobante/a4/%s" % self.id,
+            "target": "new",
+        }
+
     def _get_tipo_doc(self):
         self.ensure_one()
         if self.sunat_document_type:
