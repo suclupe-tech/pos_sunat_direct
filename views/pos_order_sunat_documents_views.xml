@@ -1,0 +1,39 @@
+<odoo>
+    <record id="view_pos_order_form_sunat_documents" model="ir.ui.view">
+        <field name="name">pos.order.form.sunat.documents</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+
+            <xpath expr="//header" position="inside">
+                <div class="btn-group">
+                    <button type="button"
+                            class="btn btn-primary dropdown-toggle"
+                            data-bs-toggle="dropdown"
+                            aria-expanded="false">
+                        Documentos SUNAT
+                    </button>
+
+                    <div class="dropdown-menu">
+                        <button name="action_open_credit_note_wizard"
+                                type="object"
+                                class="dropdown-item">
+                            Crear Nota de Crédito
+                        </button>
+
+                        <button type="button"
+                                class="dropdown-item disabled">
+                            Crear Nota de Débito
+                        </button>
+
+                        <button type="button"
+                                class="dropdown-item disabled">
+                            Crear Guía de Remisión
+                        </button>
+                    </div>
+                </div>
+            </xpath>
+
+        </field>
+    </record>
+</odoo>

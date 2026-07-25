@@ -17,10 +17,24 @@ class PosConfig(models.Model):
     sunat_serie_factura = fields.Char(string="Serie Factura SUNAT")
     sunat_serie_boleta = fields.Char(string="Serie Boleta SUNAT")
     sunat_serie_nota_venta = fields.Char(string="Serie Nota de Venta")
+    sunat_serie_nota_credito = fields.Char(string="Serie Nota de Crédito Boleta SUNAT")
+    sunat_serie_nota_credito_factura = fields.Char(
+        string="Serie Nota de Crédito Factura SUNAT"
+    )
+
+    sunat_sequence_nota_credito_factura_id = fields.Many2one(
+        "ir.sequence",
+        string="Secuencia Nota de Crédito Factura SUNAT",
+    )
 
     sunat_sequence_nota_venta_id = fields.Many2one(
         "ir.sequence",
         string="Secuencia Nota de Venta",
+    )
+
+    sunat_sequence_nota_credito_id = fields.Many2one(
+        "ir.sequence",
+        string="Secuencia Nota de Crédito Boleta SUNAT",
     )
 
     sunat_sequence_factura_id = fields.Many2one(

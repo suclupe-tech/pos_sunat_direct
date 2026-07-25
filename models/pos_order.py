@@ -20,6 +20,7 @@ class PosOrder(models.Model):
         [
             ("01", "Factura"),
             ("03", "Boleta"),
+            ("07", "Nota de Crédito"),
             ("NV", "Nota de Venta"),
         ],
         string="Tipo Documento SUNAT",
@@ -27,6 +28,40 @@ class PosOrder(models.Model):
         default="03",
     )
     sunat_document_number = fields.Char(string="Número Documento SUNAT", readonly=True)
+
+    sunat_origin_order_id = fields.Many2one(
+        "pos.order",
+        string="Documento Original",
+        readonly=True,
+    )
+
+    sunat_origin_document_type = fields.Char(
+        string="Tipo documento Original",
+        readonly=True,
+    )
+
+    sunat_origin_document_number = fields.Char(
+        string="Número documento Original",
+        readonly=True,
+    )
+
+    sunat_credit_note_reason_code = fields.Selection(
+        [
+            ("01", "Anulación de la operación"),
+            ("02", "Anulación por error en el RUC"),
+            ("03", "Corrección por error en la descripción"),
+            ("04", "Descuento global"),
+            ("05", "Descuento por ítem"),
+            ("06", "Devolución total"),
+            ("07", "Devolución por ítem"),
+            ("08", "Bonificación"),
+            ("09", "Disminución en el valor"),
+            ("10", "Otros conceptos de disminución en el valor"),
+        ],
+        string="Motivo Nota de crédito",
+        readonly=True,
+    )
+
     sunat_message = fields.Text(string="Mensaje SUNAT", readonly=True)
 
     sunat_xml = fields.Text(string="XML SUNAT")
@@ -61,6 +96,33 @@ class PosOrder(models.Model):
             "target": "new",
         }
 
+    def action_open_credit_note_wizard(self):
+        self.ensure_one()
+
+        if self.sunat_state != "aceptado":
+            raise UserError(
+                "Solo se puede crear Nota de Crédito de documentos aceptados por SUNAT."
+            )
+
+        if self.sunat_document_type not in ("01", "03"):
+            raise UserError(
+                "Solo se puede crear Nota de Crédito desde Factura o Boleta."
+            )
+
+        if not self.sunat_document_number:
+            raise UserError("La orden no tiene número de documento SUNAT.")
+
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Crear Nota de Crédito SUNAT",
+            "res_model": "sunat.credit.note.wizard",
+            "view_mode": "form",
+            "target": "new",
+            "context": {
+                "default_order_id": self.id,
+            },
+        }
+
     def _get_tipo_doc(self):
         self.ensure_one()
         if self.sunat_document_type:
@@ -71,7 +133,23 @@ class PosOrder(models.Model):
     def _get_serie(self, tipo):
         self.ensure_one()
         cfg = self.session_id.config_id
-        return cfg.sunat_serie_factura if tipo == "01" else cfg.sunat_serie_boleta
+
+        if tipo == "01":
+            return cfg.sunat_serie_factura
+
+        if tipo == "03":
+            return cfg.sunat_serie_boleta
+
+        if tipo == "07":
+            if self.sunat_origin_document_type == "01":
+                return cfg.sunat_serie_nota_credito_factura
+
+            return cfg.sunat_serie_nota_credito
+
+        if tipo == "NV":
+            return cfg.sunat_serie_nota_venta
+
+        raise UserError(f"Tipo de documento SUNAT no válido:%s" % tipo)
 
     # OJO:
     # esto luego lo cambiaremos por ir.sequence oficial SUNAT
@@ -80,14 +158,28 @@ class PosOrder(models.Model):
 
         cfg = self.session_id.config_id
 
-        sequence = (
-            cfg.sunat_sequence_factura_id
-            if tipo == "01"
-            else cfg.sunat_sequence_boleta_id
-        )
+        if tipo == "01":
+            sequence = cfg.sunat_sequence_factura_id
+
+        elif tipo == "03":
+            sequence = cfg.sunat_sequence_boleta_id
+
+        elif tipo == "07":
+            if self.sunat_origin_document_type == "01":
+                sequence = cfg.sunat_sequence_nota_credito_factura_id
+            else:
+                sequence = cfg.sunat_sequence_nota_credito_id
+
+        elif tipo == "NV":
+            sequence = cfg.sunat_sequence_nota_venta_id
+
+        else:
+            raise UserError(f"Tipo de documento SUNAT no válido:%s" % tipo)
 
         if not sequence:
-            raise Exception("Falta configurar la secuencia SUNAT en el punto de venta")
+            raise UserError(
+                "Falta configurar la secuencia SUNAT en el punto de venta" % tipo
+            )
 
         return sequence.next_by_id()
 
@@ -102,12 +194,19 @@ class PosOrder(models.Model):
                     f"{order.company_id.vat}-" f"{tipo}-" f"{serie}-" f"{correlativo}"
                 )
 
-                xml = SunatUBLBuilder.build_invoice_xml(
-                    order,
-                    tipo,
-                    serie,
-                    correlativo,
-                )
+                if tipo == "07":
+                    xml = SunatUBLBuilder.build_credit_note_xml(
+                        order,
+                        serie,
+                        correlativo,
+                    )
+                else:
+                    xml = SunatUBLBuilder.build_invoice_xml(
+                        order,
+                        tipo,
+                        serie,
+                        correlativo,
+                    )
 
                 cfg = order.session_id.config_id.sudo()
 

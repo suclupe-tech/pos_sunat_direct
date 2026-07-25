@@ -9,6 +9,24 @@
                     <field name="sunat_state" readonly="1"/>
                     <field name="sunat_document_type" readonly="1"/>
                     <field name="sunat_document_number" readonly="1"/>
+
+                    <field name="sunat_origin_order_id"
+                        readonly="1"
+                        invisible="sunat_document_type != '07'"/>
+
+                    <field name="sunat_origin_document_type"
+                        readonly="1"
+                        invisible="sunat_document_type != '07'"/>
+
+                    <field name="sunat_origin_document_number"
+                        readonly="1"
+                        invisible="sunat_document_type != '07'"/>
+
+                    <field name="sunat_credit_note_reason_code"
+                        readonly="1"
+                        invisible="sunat_document_type != '07'"/>
+
+
                     <field name="sunat_message" readonly="1"/>
                     <field name="sunat_xml" invisible="1"/>
                     <field name="sunat_xml_filename" readonly="1"/>
@@ -25,11 +43,17 @@
                 </group>
             </xpath>
             <xpath expr="//header" position="inside">
+                <button name="action_generate_sunat_xml"
+                        string="Generar XML SUNAT"
+                        type="object"
+                        class="btn-secondary"
+                        invisible="sunat_document_type != '07'"/>
+
                 <button name="action_send_sunat"
                         string="Enviar a SUNAT"
                         type="object"
                         class="btn-primary"
-                        invisible="sunat_document_type != '01'"/>
+                        invisible="sunat_document_type not in ['01', '07']"/>
             </xpath>
         </field>
     </record>

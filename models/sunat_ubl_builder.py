@@ -91,6 +91,203 @@ class SunatUBLBuilder:
         return lines_xml
 
     @staticmethod
+    def _build_credit_note_lines(order):
+        lines_xml = ""
+
+        valid_lines = order.lines.filtered(lambda l: l.qty and l.price_subtotal_incl)
+
+        for index, line in enumerate(valid_lines, start=1):
+            vals = SunatUBLBuilder._line_values(line)
+            product_name = escape(line.product_id.display_name or "PRODUCTO")
+
+            qty = abs(vals["qty"])
+            total_linea = abs(vals["total"])
+            subtotal_linea = abs(vals["subtotal"])
+            igv_linea = abs(vals["igv"])
+            precio_con_igv = abs(vals["precio_con_igv"])
+            precio_sin_igv = abs(vals["precio_sin_igv"])
+
+            lines_xml += f"""
+    <cac:CreditNoteLine>
+        <cbc:ID>{index}</cbc:ID>
+        <cbc:CreditedQuantity unitCode="NIU">{qty}</cbc:CreditedQuantity>
+        <cbc:LineExtensionAmount currencyID="PEN">{subtotal_linea:.2f}</cbc:LineExtensionAmount>
+
+        <cac:PricingReference>
+            <cac:AlternativeConditionPrice>
+                <cbc:PriceAmount currencyID="PEN">{precio_con_igv:.2f}</cbc:PriceAmount>
+                <cbc:PriceTypeCode>01</cbc:PriceTypeCode>
+            </cac:AlternativeConditionPrice>
+        </cac:PricingReference>
+
+        <cac:TaxTotal>
+            <cbc:TaxAmount currencyID="PEN">{igv_linea:.2f}</cbc:TaxAmount>
+            <cac:TaxSubtotal>
+                <cbc:TaxableAmount currencyID="PEN">{subtotal_linea:.2f}</cbc:TaxableAmount>
+                <cbc:TaxAmount currencyID="PEN">{igv_linea:.2f}</cbc:TaxAmount>
+                <cac:TaxCategory>
+                    <cbc:Percent>18.00</cbc:Percent>
+                    <cbc:TaxExemptionReasonCode>10</cbc:TaxExemptionReasonCode>
+                    <cac:TaxScheme>
+                        <cbc:ID>1000</cbc:ID>
+                        <cbc:Name>IGV</cbc:Name>
+                        <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
+                    </cac:TaxScheme>
+                </cac:TaxCategory>
+            </cac:TaxSubtotal>
+        </cac:TaxTotal>
+
+        <cac:Item>
+            <cbc:Description>{product_name}</cbc:Description>
+        </cac:Item>
+
+        <cac:Price>
+            <cbc:PriceAmount currencyID="PEN">{precio_sin_igv:.2f}</cbc:PriceAmount>
+        </cac:Price>
+    </cac:CreditNoteLine>
+"""
+
+        return lines_xml
+
+    @staticmethod
+    def build_credit_note_xml(order, serie, correlativo):
+        partner = order.partner_id
+        vat_clean = partner.vat.strip() if partner and partner.vat else ""
+
+        if vat_clean and vat_clean != "00000000":
+            cliente = partner.name
+            cliente_doc = vat_clean
+            cliente_tipo_doc = (
+                "6" if len(vat_clean) == 11 else "1" if len(vat_clean) == 8 else "0"
+            )
+        else:
+            cliente = "VARIOS"
+            cliente_doc = "0"
+            cliente_tipo_doc = "0"
+
+        valid_lines = order.lines.filtered(lambda l: l.qty and l.price_subtotal_incl)
+
+        total = abs(
+            SunatUBLBuilder._money(sum(valid_lines.mapped("price_subtotal_incl")))
+        )
+        subtotal = abs(
+            SunatUBLBuilder._money(sum(valid_lines.mapped("price_subtotal")))
+        )
+        igv = SunatUBLBuilder._money(total - subtotal)
+
+        credit_note_lines_xml = SunatUBLBuilder._build_credit_note_lines(order)
+
+        issue_date = fields.Datetime.context_timestamp(order, order.date_order).date()
+
+        origin_document_number = order.sunat_origin_document_number or ""
+        origin_document_type = order.sunat_origin_document_type or "03"
+        reason_code = order.sunat_credit_note_reason_code or "01"
+
+        reason_description = dict(
+            order._fields["sunat_credit_note_reason_code"].selection
+        ).get(reason_code, "Anulación de la operación")
+
+        return f"""<?xml version="1.0" encoding="UTF-8"?>
+<CreditNote xmlns="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+            xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+            xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+            xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">
+    <ext:UBLExtensions>
+        <ext:UBLExtension>
+            <ext:ExtensionContent/>
+        </ext:UBLExtension>
+    </ext:UBLExtensions>
+
+    <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+    <cbc:CustomizationID>2.0</cbc:CustomizationID>
+    <cbc:ID>{serie}-{correlativo}</cbc:ID>
+    <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+    <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
+
+    <cac:DiscrepancyResponse>
+        <cbc:ReferenceID>{escape(origin_document_number)}</cbc:ReferenceID>
+        <cbc:ResponseCode>{reason_code}</cbc:ResponseCode>
+        <cbc:Description>{escape(reason_description)}</cbc:Description>
+    </cac:DiscrepancyResponse>
+
+    <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+            <cbc:ID>{escape(origin_document_number)}</cbc:ID>
+            <cbc:DocumentTypeCode>{origin_document_type}</cbc:DocumentTypeCode>
+        </cac:InvoiceDocumentReference>
+    </cac:BillingReference>
+
+    <cac:Signature>
+        <cbc:ID>{serie}-{correlativo}</cbc:ID>
+        <cac:SignatoryParty>
+            <cac:PartyIdentification>
+                <cbc:ID>{escape(order.company_id.vat or "")}</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>{escape(order.company_id.name or "")}</cbc:Name>
+            </cac:PartyName>
+        </cac:SignatoryParty>
+        <cac:DigitalSignatureAttachment>
+            <cac:ExternalReference>
+                <cbc:URI>#signatureKG</cbc:URI>
+            </cac:ExternalReference>
+        </cac:DigitalSignatureAttachment>
+    </cac:Signature>
+
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="6">{escape(order.company_id.vat or "")}</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>{escape(order.company_id.name or "")}</cbc:RegistrationName>
+                <cac:RegistrationAddress>
+                    <cbc:AddressTypeCode>0000</cbc:AddressTypeCode>
+                </cac:RegistrationAddress>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID schemeID="{cliente_tipo_doc}">{escape(cliente_doc)}</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>{escape(cliente)}</cbc:RegistrationName>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="PEN">{subtotal:.2f}</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="PEN">{igv:.2f}</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:Percent>18.00</cbc:Percent>
+                <cbc:TaxExemptionReasonCode>10</cbc:TaxExemptionReasonCode>
+                <cac:TaxScheme>
+                    <cbc:ID>1000</cbc:ID>
+                    <cbc:Name>IGV</cbc:Name>
+                    <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="PEN">{subtotal:.2f}</cbc:LineExtensionAmount>
+        <cbc:TaxInclusiveAmount currencyID="PEN">{total:.2f}</cbc:TaxInclusiveAmount>
+        <cbc:AllowanceTotalAmount currencyID="PEN">0.00</cbc:AllowanceTotalAmount>
+        <cbc:ChargeTotalAmount currencyID="PEN">0.00</cbc:ChargeTotalAmount>
+        <cbc:PayableAmount currencyID="PEN">{total:.2f}</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+{credit_note_lines_xml}
+</CreditNote>
+"""
+
+    @staticmethod
     def build_invoice_xml(order, tipo, serie, correlativo):
         # --- CORRECCIÓN DINÁMICA DE CLIENTE (CONFORME A SUNAT UBL 2.1) ---
         partner = order.partner_id

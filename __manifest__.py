@@ -9,14 +9,14 @@
     ],
     "data": [
         "security/ir.model.access.csv",
-
         "data/sequence_data.xml",
         "data/ir_cron.xml",
-        
         "views/pos_config_views.xml",
         "views/pos_order_views.xml",
         "views/sunat_summary_batch_views.xml",
         "views/pos_order_report.xml",
+        "wizard/sunat_credit_note_wizard_views.xml",
+        "views/pos_order_sunat_documents_views.xml",
     ],
     "assets": {
         "point_of_sale._assets_pos": [

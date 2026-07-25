@@ -1,0 +1,29 @@
+<odoo>
+    <record id="view_sunat_credit_note_wizard_form" model="ir.ui.view">
+        <field name="name">sunat.credit.note.wizard.form</field>
+        <field name="model">sunat.credit.note.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Crear Nota de Crédito SUNAT">
+                <group>
+                    <field name="order_id"/>
+                    <field name="sunat_document_type"/>
+                    <field name="sunat_document_number"/>
+                    <field name="amount_total"/>
+                    <field name="reason_code"/>
+                    <field name="reason_description"/>
+                </group>
+
+                <footer>
+                    <button name="action_confirm_credit_note"
+                            type="object"
+                            string="Crear Nota de Crédito"
+                            class="btn-primary"/>
+
+                    <button string="Cancelar"
+                            class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>
