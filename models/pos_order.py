@@ -420,6 +420,7 @@ class PosOrder(models.Model):
         [
             ("factura", "Factura"),
             ("boleta", "Boleta"),
+            ("nota_credito", "Nota de Crédito"),
             ("nota_venta", "Nota de Venta"),
         ],
         string="Tipo Documento",
@@ -438,6 +439,7 @@ class PosOrder(models.Model):
     )
     def _compute_tipo_documento_reporte(self):
         for order in self:
+
             if order.sunat_document_type == "01":
                 order.tipo_documento_reporte = "factura"
                 order.numero_documento_reporte = (
@@ -450,8 +452,29 @@ class PosOrder(models.Model):
                     order.sunat_document_number or order.name
                 )
 
-            else:
+            elif order.sunat_document_type == "07":
+                order.tipo_documento_reporte = "nota_credito"
+                order.numero_documento_reporte = (
+                    order.sunat_document_number or order.name
+                )
+
+            elif order.sunat_document_type == "NV":
                 order.tipo_documento_reporte = "nota_venta"
+                # Si sunat_document_number aún no existe, forzamos la obtención de la serie/correlativo
+                if order.sunat_document_number:
+                    order.numero_documento_reporte = order.sunat_document_number
+                else:
+                    cfg = order.session_id.config_id
+                    if cfg and cfg.sunat_serie_nota_venta:
+                        # Para reportar la serie configurada si no se ha guardado el correlativo aún
+                        order.numero_documento_reporte = (
+                            order.sunat_document_number or order.name
+                        )
+                    else:
+                        order.numero_documento_reporte = order.name
+
+            else:
+                order.tipo_documento_reporte = False
                 order.numero_documento_reporte = order.pos_reference or order.name
 
     @api.model
@@ -461,7 +484,7 @@ class PosOrder(models.Model):
         # Control seguro: solo aceptar valores validos
         tipo = ui_order.get("sunat_document_type")
 
-        if tipo in ("01", "03", "NV"):
+        if tipo in ("01", "03", "07", "NV"):
 
             vals["sunat_document_type"] = tipo
 
