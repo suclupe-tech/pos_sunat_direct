@@ -111,6 +111,34 @@ class SunatCreditNoteWizard(models.TransientModel):
 
         refund_order = refund_orders[0]
 
+        # ==========================================================
+        # EVITAR NOTAS DE CRÉDITO DUPLICADAS
+        #
+        # Si el reembolso ya fue convertido en Nota de Crédito y
+        # tiene numeración SUNAT, no se debe limpiar ni generar otra.
+        # ==========================================================
+        if (
+            refund_order.sunat_document_type == "07"
+            and refund_order.sunat_document_number
+        ):
+            if (
+                refund_order.sunat_state == "aceptado"
+                or refund_order.sunat_cdr_code == "0"
+            ):
+                raise UserError(
+                    f"Este reembolso ya tiene la Nota de Crédito "
+                    f"{refund_order.sunat_document_number} aceptada por SUNAT. "
+                    "No se generará otra Nota de Crédito."
+                )
+
+            raise UserError(
+                f"Este reembolso ya tiene la Nota de Crédito "
+                f"{refund_order.sunat_document_number} con estado "
+                f"{refund_order.sunat_state}. "
+                "No se generará una nueva numeración. "
+                "Revisa la Nota de Crédito existente para continuar con su envío."
+            )
+
         refund_order.write(
             {
                 "sunat_document_type": "07",
