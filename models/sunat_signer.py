@@ -1,6 +1,25 @@
+import os
 import sys
 
-sys.path.insert(0, r"C:\odoo_libs")
+# ==========================================================
+# LIBRERÍAS EXTERNAS DE SUNAT
+#
+# En el entorno de casa las librerías están en D:\odoo_libs
+# y en el servidor/trabajo están en C:\odoo_libs.
+#
+# Se utiliza automáticamente la primera ruta existente para
+# que el mismo código funcione en ambos entornos.
+# ==========================================================
+RUTAS_ODOO_LIBS = [
+    r"D:\odoo_libs",
+    r"C:\odoo_libs",
+]
+
+for ruta_librerias in RUTAS_ODOO_LIBS:
+    if os.path.isdir(ruta_librerias):
+        if ruta_librerias not in sys.path:
+            sys.path.insert(0, ruta_librerias)
+        break
 
 from lxml import etree
 from signxml.signer import XMLSigner

@@ -139,6 +139,23 @@ class SunatCreditNoteWizard(models.TransientModel):
             }
         )
 
+        # ==========================================================
+        # GENERACIÓN Y ENVÍO AUTOMÁTICO DE LA NOTA DE CRÉDITO
+        #
+        # Una vez que el reembolso fue convertido en Nota de Crédito:
+        # 1. Genera y firma el XML tipo 07.
+        # 2. Verifica que el XML se haya generado correctamente.
+        # 3. Envía la Nota de Crédito directamente a SUNAT.
+        # 4. SUNAT devolverá el CDR y actualizará el estado.
+        # ==========================================================
+
+        refund_order.action_generate_sunat_xml()
+
+        # action_generate_sunat_xml captura internamente los errores,
+        # por eso verificamos el resultado antes de intentar enviarlo.
+        if refund_order.sunat_state == "xml_firmado" and refund_order.sunat_xml:
+            refund_order.action_send_sunat()
+
         return {
             "type": "ir.actions.act_window",
             "name": "Nota de Crédito SUNAT",
