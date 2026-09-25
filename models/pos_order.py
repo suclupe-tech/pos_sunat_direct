@@ -356,6 +356,21 @@ class PosOrder(models.Model):
         pos_order_id = super()._process_order(order, draft)
         pos_order = self.browse(pos_order_id)
 
+        # ============================================================
+        # SEGURIDAD: NO GENERAR DOCUMENTOS EN ÓRDENES NO FINALIZADAS
+        #
+        # Una orden cancelada o que no llegó a completarse no debe:
+        # - consumir correlativo
+        # - generar XML
+        # - quedar pendiente de resumen SUNAT
+        # ============================================================
+        if (
+            not pos_order
+            or not pos_order.exists()
+            or pos_order.state not in ("paid", "done", "invoiced")
+        ):
+            return pos_order_id
+
         try:
             if pos_order and pos_order.exists():
 
