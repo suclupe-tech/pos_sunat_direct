@@ -88,6 +88,28 @@ class PosOrder(models.Model):
         readonly=True,
     )
 
+    # =====================================================
+    # DATOS DEL RC DE BAJA SUNAT
+    # Se mantienen separados del RC original para no perder
+    # el historial del documento que fue aceptado inicialmente.
+    # =====================================================
+
+    sunat_cancel_summary_id = fields.Char(
+        string="Ticket RC de Baja",
+        readonly=True,
+    )
+
+    sunat_cancel_rc_batch_id = fields.Many2one(
+        "sunat.summary.batch",
+        string="Lote RC de Baja",
+        readonly=True,
+    )
+
+    sunat_cancel_message = fields.Text(
+        string="Mensaje Baja SUNAT",
+        readonly=True,
+    )
+
     def action_print_comprobante_a4_html(self):
         self.ensure_one()
         return {

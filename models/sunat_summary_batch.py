@@ -21,6 +21,18 @@ class SunatSummaryBatch(models.Model):
         required=True,
     )
 
+    # Tipo de operación que realizará el Resumen Diario
+    summary_type = fields.Selection(
+        [
+            ("normal", "Envío de boletas"),
+            ("cancel", "Baja de boletas"),
+        ],
+        string="Tipo de resumen",
+        default="normal",
+        required=True,
+        readonly=True,
+    )
+
     state = fields.Selection(
         [
             ("draft", "Borrador"),
@@ -76,7 +88,14 @@ class SunatSummaryBatch(models.Model):
                 continue
 
             try:
-                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(batch.order_ids)
+                # RC normal = 1 (Adicionar)
+                # RC de baja = 3 (Anulado)
+                condition_code = "3" if batch.summary_type == "cancel" else "1"
+
+                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(
+                    batch.order_ids,
+                    condition_code=condition_code,
+                )
 
                 first_order = batch.order_ids[0]
                 cfg = first_order.session_id.config_id.sudo()
@@ -154,15 +173,37 @@ class SunatSummaryBatch(models.Model):
                     }
                 )
 
-                batch.order_ids.write(
-                    {
-                        "sunat_state": "rc_enviado",
-                        "sunat_summary_id": ticket,
-                        "sunat_message": f"Incluido en Resumen Diario RC {rc_id}. "
-                        f"Ticket SUNAT: {ticket}",
-                        "sunat_rc_batch_id": batch.id,
-                    }
-                )
+                # =====================================================
+                # GUARDAR RESULTADO DEL ENVÍO SEGÚN TIPO DE RC
+                # =====================================================
+
+                if batch.summary_type == "cancel":
+                    # RC de baja:
+                    # no sobrescribimos los datos del RC original.
+                    batch.order_ids.write(
+                        {
+                            "sunat_state": "baja_enviada",
+                            "sunat_cancel_summary_id": ticket,
+                            "sunat_cancel_message": (
+                                f"Baja enviada mediante Resumen Diario {rc_id}. "
+                                f"Ticket SUNAT: {ticket}"
+                            ),
+                            "sunat_cancel_rc_batch_id": batch.id,
+                        }
+                    )
+                else:
+                    # RC normal de boletas.
+                    batch.order_ids.write(
+                        {
+                            "sunat_state": "rc_enviado",
+                            "sunat_summary_id": ticket,
+                            "sunat_message": (
+                                f"Incluido en Resumen Diario RC {rc_id}. "
+                                f"Ticket SUNAT: {ticket}"
+                            ),
+                            "sunat_rc_batch_id": batch.id,
+                        }
+                    )
 
             except Exception as e:
                 batch.write(

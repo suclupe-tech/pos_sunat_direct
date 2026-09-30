@@ -6,7 +6,16 @@ import pytz
 class SunatSummaryBuilder:
 
     @staticmethod
-    def build_rc_xml(orders):
+    def build_rc_xml(orders, condition_code="1"):
+        # Estados permitidos por SUNAT:
+        # 1 = Adicionar
+        # 2 = Modificar
+        # 3 = Anulado
+        if condition_code not in ("1", "2", "3"):
+            raise Exception(
+                f"Estado RC no válido: {condition_code}. " "Solo se permiten 1, 2 o 3."
+            )
+
         if not orders:
             raise Exception("No hay boletas para generar el resumen RC.")
 
@@ -36,8 +45,14 @@ class SunatSummaryBuilder:
                 "No puedes generar un mismo Resumen Diario con boletas de fechas distintas."
             )
 
-        # Fecha de emisión del resumen.
-        issue_date = reference_date
+        # Fecha de generación del RC.
+        # ReferenceDate seguirá siendo la fecha original de las boletas.
+        issue_date = fields.Datetime.now()
+
+        if issue_date.tzinfo is None:
+            issue_date = pytz.utc.localize(issue_date)
+
+        issue_date = issue_date.astimezone(tz_pe).date()
 
         prefix = f"RC-{reference_date.strftime('%Y%m%d')}-"
 
@@ -101,7 +116,7 @@ class SunatSummaryBuilder:
 </cac:AccountingCustomerParty>
 
 <cac:Status>
-<cbc:ConditionCode>1</cbc:ConditionCode>
+<cbc:ConditionCode>{condition_code}</cbc:ConditionCode>
 </cac:Status>
 
 <sac:TotalAmount currencyID="PEN">{total:.2f}</sac:TotalAmount>
