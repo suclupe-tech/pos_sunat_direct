@@ -110,6 +110,18 @@ class PosOrder(models.Model):
         readonly=True,
     )
 
+    # =====================================================
+    # CONTROL PARA MOSTRAR EL BOTÓN "PREPARAR BAJA SUNAT"
+    # =====================================================
+    # Este campo pertenece a pos_sunat_direct.
+    # Evita usar directamente en el XML los campos
+    # venta_anulada y es_reversa_anulacion, que pertenecen
+    # al módulo pos_anulacion_ventas.
+    sunat_can_prepare_cancel = fields.Boolean(
+        string="Puede preparar baja SUNAT",
+        compute="_compute_sunat_can_prepare_cancel",
+    )
+
     def action_print_comprobante_a4_html(self):
         self.ensure_one()
         return {
@@ -144,6 +156,28 @@ class PosOrder(models.Model):
                 "default_order_id": self.id,
             },
         }
+
+    def _compute_sunat_can_prepare_cancel(self):
+        for order in self:
+            # Estos campos pertenecen al módulo pos_anulacion_ventas.
+            # Usamos getattr para que pos_sunat_direct no dependa
+            # directamente de ese módulo.
+            venta_anulada = getattr(order, "venta_anulada", False)
+            es_reversa = getattr(order, "es_reversa_anulacion", False)
+
+            # El botón "Preparar baja SUNAT" solo debe aparecer cuando:
+            # - Sea una Boleta.
+            # - Ya esté aceptada por SUNAT.
+            # - Esté cancelada en Odoo o marcada como anulada.
+            # - No sea una reversa de anulación.
+            # - Todavía no tenga un RC de baja creado.
+            order.sunat_can_prepare_cancel = (
+                order.sunat_document_type == "03"
+                and order.sunat_state == "aceptado"
+                and (order.state == "cancel" or venta_anulada)
+                and not es_reversa
+                and not order.sunat_cancel_rc_batch_id
+            )
 
     def action_create_sunat_cancel_rc(self):
         """
