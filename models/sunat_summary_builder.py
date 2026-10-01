@@ -54,7 +54,9 @@ class SunatSummaryBuilder:
 
         issue_date = issue_date.astimezone(tz_pe).date()
 
-        prefix = f"RC-{reference_date.strftime('%Y%m%d')}-"
+        # El nombre del RC debe usar la fecha de generación del resumen
+        # (IssueDate), no la fecha original de las boletas.
+        prefix = f"RC-{issue_date.strftime('%Y%m%d')}-"
 
         last_batch = env["sunat.summary.batch"].search(
             [("name", "like", prefix)],
