@@ -1,4 +1,5 @@
 from odoo import models, fields
+from odoo.exceptions import UserError
 from .sunat_summary_builder import SunatSummaryBuilder
 from .sunat_signer import SunatSigner
 from .sunat_client import SunatClient
@@ -62,11 +63,30 @@ class SunatSummaryBatch(models.Model):
 
     def action_load_pending_boletas(self):
         for batch in self:
+
+            # =====================================================
+            # SEGURIDAD: UN RC DE BAJA NO DEBE CARGAR BOLETAS NORMALES
+            # =====================================================
+            # Los RC de baja se crean directamente desde una boleta
+            # específica. No se permite cargar las boletas pendientes
+            # del flujo normal porque reemplazaríamos la boleta a anular.
+            if batch.summary_type == "cancel":
+                raise UserError(
+                    "No se pueden cargar boletas pendientes en un RC de baja. "
+                    "Las bajas se crean directamente desde la boleta anulada."
+                )
+
+            # =====================================================
+            # CARGAR BOLETAS PENDIENTES PARA RC NORMAL
+            # =====================================================
             orders = self.env["pos.order"].search(
                 [
                     ("sunat_state", "=", "pendiente_resumen"),
                     ("sunat_document_type", "=", "03"),
                     ("sunat_rc_batch_id", "=", False),
+                    # No incluir ventas anuladas ni reversas
+                    ("venta_anulada", "!=", True),
+                    ("es_reversa_anulacion", "!=", True),
                 ],
                 order="sunat_document_number asc",
             )
@@ -291,6 +311,9 @@ class SunatSummaryBatch(models.Model):
                         )
 
                     if cdr_code == "0":
+                        # =====================================================
+                        # CDR ACEPTADO POR SUNAT
+                        # =====================================================
                         batch.write(
                             {
                                 "state": "accepted",
@@ -300,17 +323,39 @@ class SunatSummaryBatch(models.Model):
                             }
                         )
 
-                        batch.order_ids.write(
-                            {
-                                "sunat_state": "aceptado",
-                                "sunat_message": (
-                                    f"Aceptado vía Resumen Diario {batch.name}. "
-                                    f"Código CDR: {cdr_code} - {cdr_description}"
-                                ),
-                            }
-                        )
+                        if batch.summary_type == "cancel":
+                            # -------------------------------------------------
+                            # RC DE BAJA ACEPTADO
+                            # Conservamos intactos los datos del RC original.
+                            # -------------------------------------------------
+                            batch.order_ids.write(
+                                {
+                                    "sunat_state": "baja_aceptada",
+                                    "sunat_cancel_message": (
+                                        f"Baja aceptada vía Resumen Diario {batch.name}. "
+                                        f"Código CDR: {cdr_code} - {cdr_description}"
+                                    ),
+                                }
+                            )
+
+                        else:
+                            # -------------------------------------------------
+                            # RC NORMAL ACEPTADO
+                            # -------------------------------------------------
+                            batch.order_ids.write(
+                                {
+                                    "sunat_state": "aceptado",
+                                    "sunat_message": (
+                                        f"Aceptado vía Resumen Diario {batch.name}. "
+                                        f"Código CDR: {cdr_code} - {cdr_description}"
+                                    ),
+                                }
+                            )
 
                     else:
+                        # =====================================================
+                        # CDR RECHAZADO POR SUNAT
+                        # =====================================================
                         batch.write(
                             {
                                 "state": "error",
@@ -320,15 +365,30 @@ class SunatSummaryBatch(models.Model):
                             }
                         )
 
-                        batch.order_ids.write(
-                            {
-                                "sunat_state": "error",
-                                "sunat_message": (
-                                    f"RC {batch.name} rechazado. "
-                                    f"Código CDR: {cdr_code} - {cdr_description}"
-                                ),
-                            }
-                        )
+                        if batch.summary_type == "cancel":
+                            # La baja fue rechazada.
+                            # El comprobante original continúa aceptado en SUNAT.
+                            batch.order_ids.write(
+                                {
+                                    "sunat_state": "aceptado",
+                                    "sunat_cancel_message": (
+                                        f"Baja rechazada en RC {batch.name}. "
+                                        f"Código CDR: {cdr_code} - {cdr_description}"
+                                    ),
+                                }
+                            )
+
+                        else:
+                            # RC normal rechazado.
+                            batch.order_ids.write(
+                                {
+                                    "sunat_state": "error",
+                                    "sunat_message": (
+                                        f"RC {batch.name} rechazado. "
+                                        f"Código CDR: {cdr_code} - {cdr_description}"
+                                    ),
+                                }
+                            )
 
                     continue
 

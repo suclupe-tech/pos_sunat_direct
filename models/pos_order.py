@@ -145,6 +145,114 @@ class PosOrder(models.Model):
             },
         }
 
+    def action_create_sunat_cancel_rc(self):
+        """
+        Crea un Resumen Diario de baja SUNAT para una boleta
+        que quedó anulada en Odoo pero ya fue aceptada por SUNAT.
+
+        No envía automáticamente:
+        crea el lote de baja para poder revisarlo antes del envío.
+        """
+        self.ensure_one()
+
+        # =====================================================
+        # VALIDACIONES DE SEGURIDAD
+        # =====================================================
+
+        if self.sunat_document_type != "03":
+            raise UserError("La baja mediante Resumen Diario solo aplica a Boletas.")
+
+        if not self.sunat_document_number:
+            raise UserError("La orden no tiene número de Boleta SUNAT.")
+
+        # La boleta debe haber sido aceptada previamente por SUNAT.
+        if self.sunat_state != "aceptado":
+            raise UserError(
+                "Solo se puede comunicar la baja de una boleta "
+                "que previamente fue aceptada por SUNAT."
+            )
+
+        # =====================================================
+        # VALIDAR QUE EXISTA EL RC ORIGINAL ACEPTADO
+        # =====================================================
+        if not self.sunat_rc_batch_id:
+            raise UserError(
+                "La boleta figura como aceptada, pero no tiene "
+                "un Resumen Diario original asociado."
+            )
+
+        if self.sunat_rc_batch_id.state != "accepted":
+            raise UserError(
+                "El Resumen Diario original de esta boleta "
+                "no figura como aceptado por SUNAT."
+            )
+
+        # =====================================================
+        # VALIDAR QUE LA ORDEN ESTÉ CANCELADA / ANULADA
+        # =====================================================
+        # Puede haber quedado cancelada directamente por Odoo
+        # (state = cancel) o haber pasado por nuestro flujo
+        # personalizado de anulación (venta_anulada = True).
+        esta_cancelada = self.state == "cancel"
+        esta_anulada = getattr(self, "venta_anulada", False)
+
+        if not esta_cancelada and not esta_anulada:
+            raise UserError(
+                "Esta orden no está cancelada ni marcada como anulada en Odoo."
+            )
+
+        # Una reversa de anulación no debe generar una baja SUNAT.
+        if getattr(self, "es_reversa_anulacion", False):
+            raise UserError(
+                "Una orden de reversa de anulación no puede generar una baja SUNAT."
+            )
+
+        # Evitar crear dos bajas para el mismo documento.
+        if self.sunat_cancel_rc_batch_id:
+            raise UserError("Esta boleta ya tiene un Resumen Diario de baja asociado.")
+
+        # =====================================================
+        # FECHA ORIGINAL DE LA BOLETA EN HORA PERÚ
+        # =====================================================
+
+        fecha_boleta = fields.Datetime.context_timestamp(
+            self,
+            self.date_order,
+        ).date()
+
+        # =====================================================
+        # CREAR LOTE DE BAJA
+        # =====================================================
+
+        batch = self.env["sunat.summary.batch"].create(
+            {
+                "date": fecha_boleta,
+                "summary_type": "cancel",
+                "order_ids": [(6, 0, self.ids)],
+            }
+        )
+
+        # Guardamos la relación desde este momento para impedir
+        # crear accidentalmente otra baja para la misma boleta.
+        self.write(
+            {
+                "sunat_cancel_rc_batch_id": batch.id,
+                "sunat_cancel_message": (
+                    f"RC de baja {batch.id} creado. " "Pendiente de envío a SUNAT."
+                ),
+            }
+        )
+
+        # Abrir el lote para revisarlo antes de enviarlo.
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Resumen Diario de Baja SUNAT",
+            "res_model": "sunat.summary.batch",
+            "res_id": batch.id,
+            "view_mode": "form",
+            "target": "current",
+        }
+
     def _get_tipo_doc(self):
         self.ensure_one()
         if self.sunat_document_type:
@@ -265,10 +373,19 @@ class PosOrder(models.Model):
     def action_send_sunat(self):
         for order in self:
 
-            if order.sunat_state == "aceptado":
+            # No reenviar documentos que ya fueron aceptados,
+            # tienen una baja en proceso o ya fueron dados de baja.
+            if order.sunat_state in (
+                "aceptado",
+                "baja_enviada",
+                "baja_aceptada",
+            ):
                 order.write(
                     {
-                        "sunat_message": "Documento ya fue aceptado por SUNAT. No se reenviará."
+                        "sunat_message": (
+                            "Documento ya fue procesado por SUNAT "
+                            "o tiene una baja en proceso. No se reenviará."
+                        )
                     }
                 )
                 continue

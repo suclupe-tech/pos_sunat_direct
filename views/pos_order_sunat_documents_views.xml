@@ -6,6 +6,18 @@
         <field name="arch" type="xml">
 
             <xpath expr="//header" position="inside">
+
+                <!-- =====================================================
+                     CAMPOS NECESARIOS PARA CONTROLAR LA VISIBILIDAD
+                     DEL BOTÓN DE BAJA SUNAT
+                ====================================================== -->
+                <field name="sunat_document_type" invisible="1"/>
+                <field name="sunat_state" invisible="1"/>
+                <field name="state" invisible="1"/>
+                <field name="venta_anulada" invisible="1"/>
+                <field name="es_reversa_anulacion" invisible="1"/>
+                <field name="sunat_cancel_rc_batch_id" invisible="1"/>
+
                 <div class="btn-group">
                     <button type="button"
                             class="btn btn-primary dropdown-toggle"
@@ -15,12 +27,37 @@
                     </button>
 
                     <div class="dropdown-menu">
+
+                        <!-- NOTA DE CRÉDITO -->
                         <button name="action_open_credit_note_wizard"
                                 type="object"
                                 class="dropdown-item">
                             Crear Nota de Crédito
                         </button>
 
+                        <!-- =================================================
+                             BAJA DE BOLETA SUNAT
+                             Solo aparece cuando:
+                             - Es Boleta
+                             - SUNAT la aceptó
+                             - Está cancelada o anulada en Odoo
+                             - No es una reversa
+                             - Todavía no tiene RC de baja
+                        ================================================== -->
+                        <button name="action_create_sunat_cancel_rc"
+                                type="object"
+                                class="dropdown-item"
+                                invisible="
+                                    sunat_document_type != '03'
+                                    or sunat_state != 'aceptado'
+                                    or (state != 'cancel' and not venta_anulada)
+                                    or es_reversa_anulacion
+                                    or sunat_cancel_rc_batch_id
+                                ">
+                            Preparar baja SUNAT
+                        </button>
+
+                        <!-- PRÓXIMAMENTE -->
                         <button type="button"
                                 class="dropdown-item disabled">
                             Crear Nota de Débito
@@ -30,8 +67,10 @@
                                 class="dropdown-item disabled">
                             Crear Guía de Remisión
                         </button>
+
                     </div>
                 </div>
+
             </xpath>
 
         </field>

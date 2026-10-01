@@ -3,11 +3,47 @@
         <field name="name">sunat.summary.batch.form</field>
         <field name="model">sunat.summary.batch</field>
         <field name="arch" type="xml">
+
             <form string="Resumen RC SUNAT">
+
+                <!-- =====================================================
+                     ACCIONES MANUALES SOLO PARA RC DE BAJA
+                ====================================================== -->
+                <header>
+
+                    <!--
+                        Las boletas normales siguen enviándose
+                        automáticamente por el cron.
+
+                        Este botón aparece únicamente para una baja
+                        preparada manualmente.
+                    -->
+                    <button name="action_send_summary"
+                            type="object"
+                            string="Enviar baja a SUNAT"
+                            class="btn-primary"
+                            invisible="summary_type != 'cancel' or state not in ('draft', 'error')"/>
+
+                    <!--
+                        Después de recibir el ticket de SUNAT,
+                        permite consultar el resultado de la baja.
+                    -->
+                    <button name="action_check_ticket"
+                            type="object"
+                            string="Consultar baja SUNAT"
+                            class="btn-secondary"
+                            invisible="summary_type != 'cancel' or not ticket or state == 'accepted'"/>
+
+                </header>
+
                 <sheet>
                     <group>
                         <field name="name"/>
                         <field name="date"/>
+
+                        <!-- Permite identificar si es normal o baja -->
+                        <field name="summary_type"/>
+
                         <field name="state"/>
                         <field name="ticket"/>
                     </group>
@@ -23,8 +59,15 @@
                         <field name="response_message"/>
                     </group>
 
-                    <field name="order_ids"/>
+                    <!--
+                        Si es una baja no permitimos cambiar la boleta
+                        que originó el RC.
+                    -->
+                    <field name="order_ids"
+                           readonly="summary_type == 'cancel'"/>
+
                 </sheet>
+
             </form>
         </field>
     </record>
@@ -33,12 +76,15 @@
         <field name="name">sunat.summary.batch.tree</field>
         <field name="model">sunat.summary.batch</field>
         <field name="arch" type="xml">
+
             <list string="Resumenes RC SUNAT">
                 <field name="name"/>
                 <field name="date"/>
+                <field name="summary_type"/>
                 <field name="state"/>
                 <field name="ticket"/>
             </list>
+
         </field>
     </record>
 
@@ -49,7 +95,7 @@
     </record>
 
     <menuitem id="menu_sunat_summary_batch"
-            name="Resumenes RC SUNAT"
-            action="action_sunat_summary_batch"
-            sequence="90"/>
+              name="Resumenes RC SUNAT"
+              action="action_sunat_summary_batch"
+              sequence="90"/>
 </odoo>
