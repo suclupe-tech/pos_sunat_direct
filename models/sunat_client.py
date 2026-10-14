@@ -10,6 +10,106 @@ class SunatClient:
         return "https://e-factura.sunat.gob.pe/ol-ti-itcpfegem/billService"
 
     @staticmethod
+    def get_consult_url():
+        return "https://e-factura.sunat.gob.pe/" "ol-it-wsconscpegem/billConsultService"
+
+    @staticmethod
+    def get_status_cdr(
+        username,
+        password,
+        ruc_comprobante,
+        tipo_comprobante,
+        serie_comprobante,
+        numero_comprobante,
+    ):
+        url = SunatClient.get_consult_url()
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:ser="http://service.sunat.gob.pe"
+xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+<soapenv:Header>
+<wsse:Security>
+<wsse:UsernameToken>
+<wsse:Username>{username}</wsse:Username>
+<wsse:Password>{password}</wsse:Password>
+</wsse:UsernameToken>
+</wsse:Security>
+</soapenv:Header>
+<soapenv:Body>
+<ser:getStatusCdr>
+<rucComprobante>{ruc_comprobante}</rucComprobante>
+<tipoComprobante>{tipo_comprobante}</tipoComprobante>
+<serieComprobante>{serie_comprobante}</serieComprobante>
+<numeroComprobante>{numero_comprobante}</numeroComprobante>
+</ser:getStatusCdr>
+</soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "",
+        }
+
+        response = requests.post(
+            url,
+            data=soap_body.encode("utf-8"),
+            headers=headers,
+            timeout=(10, 120),
+        )
+
+        return response.status_code, response.text
+
+    @staticmethod
+    def get_document_status(
+        username,
+        password,
+        ruc_comprobante,
+        tipo_comprobante,
+        serie_comprobante,
+        numero_comprobante,
+    ):
+        url = SunatClient.get_consult_url()
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:ser="http://service.sunat.gob.pe"
+xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+<soapenv:Header>
+<wsse:Security>
+<wsse:UsernameToken>
+<wsse:Username>{username}</wsse:Username>
+<wsse:Password>{password}</wsse:Password>
+</wsse:UsernameToken>
+</wsse:Security>
+</soapenv:Header>
+<soapenv:Body>
+<ser:getStatus>
+<rucComprobante>{ruc_comprobante}</rucComprobante>
+<tipoComprobante>{tipo_comprobante}</tipoComprobante>
+<serieComprobante>{serie_comprobante}</serieComprobante>
+<numeroComprobante>{numero_comprobante}</numeroComprobante>
+</ser:getStatus>
+</soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "",
+        }
+
+        response = requests.post(
+            url,
+            data=soap_body.encode("utf-8"),
+            headers=headers,
+            timeout=(10, 120),
+        )
+
+        return response.status_code, response.text
+
+    @staticmethod
     def send_bill(mode, username, password, filename, zip_base64):
         url = SunatClient.get_url(mode)
 

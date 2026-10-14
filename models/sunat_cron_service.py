@@ -55,17 +55,37 @@ class SunatCronService(models.AbstractModel):
         return True
 
     def cron_check_pending_tickets(self):
+        self.env["sunat.summary.batch"].cron_retry_pending_summaries()
+        return True
 
-        batches = self.env["sunat.summary.batch"].search(
+    def cron_retry_pending_invoices(self):
+
+        # ============================================================
+        # 1. FACTURAS CON RESPUESTA INCIERTA
+        # Primero consultar SUNAT. Nunca reenviar directamente.
+        # ============================================================
+        invoices_to_verify = self.env["pos.order"].search(
             [
-                ("state", "=", "sent"),
-                ("ticket", "!=", False),
+                ("sunat_document_type", "=", "01"),
+                ("sunat_state", "=", "pendiente_verificacion"),
             ]
         )
 
-        if not batches:
-            return True
+        if invoices_to_verify:
+            invoices_to_verify.action_verify_sunat_invoice()
 
-        batches.action_check_ticket()
+        # ============================================================
+        # 2. FACTURAS QUE SUNAT CONFIRMÓ QUE NO EXISTEN
+        # Recién estas quedan autorizadas para reintento.
+        # ============================================================
+        invoices_to_send = self.env["pos.order"].search(
+            [
+                ("sunat_document_type", "=", "01"),
+                ("sunat_state", "=", "pendiente_envio"),
+            ]
+        )
+
+        for order in invoices_to_send:
+            order.action_send_sunat()
 
         return True

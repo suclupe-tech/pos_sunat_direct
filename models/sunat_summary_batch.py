@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 from odoo.exceptions import UserError
 from .sunat_summary_builder import SunatSummaryBuilder
 from .sunat_signer import SunatSigner
@@ -98,6 +98,12 @@ class SunatSummaryBatch(models.Model):
     def action_send_summary(self):
         for batch in self:
 
+            # Si SUNAT ya entregó un ticket, no volver a enviar el RC.
+            # Solo se debe consultar el estado del mismo ticket.
+            if batch.ticket:
+                batch.action_check_ticket()
+                continue
+
             if not batch.order_ids:
                 batch.write(
                     {
@@ -107,35 +113,119 @@ class SunatSummaryBatch(models.Model):
                 )
                 continue
 
-            try:
-                # RC normal = 1 (Adicionar)
-                # RC de baja = 3 (Anulado)
-                condition_code = "3" if batch.summary_type == "cancel" else "1"
-
-                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(
-                    batch.order_ids,
-                    condition_code=condition_code,
+            # =====================================================
+            # RESERVAR COMPROBANTES AL INICIAR EL ENVÍO
+            # =====================================================
+            if batch.summary_type == "cancel":
+                conflicting_orders = batch.order_ids.filtered(
+                    lambda o: (
+                        o.sunat_cancel_rc_batch_id
+                        and o.sunat_cancel_rc_batch_id.id != batch.id
+                    )
                 )
 
+                if conflicting_orders:
+                    raise UserError(
+                        "Una o más boletas ya pertenecen a otro RC de baja."
+                    )
+
+                batch.order_ids.filtered(
+                    lambda o: not o.sunat_cancel_rc_batch_id
+                ).write(
+                    {
+                        "sunat_cancel_rc_batch_id": batch.id,
+                    }
+                )
+
+            else:
+                conflicting_orders = batch.order_ids.filtered(
+                    lambda o: (
+                        o.sunat_rc_batch_id and o.sunat_rc_batch_id.id != batch.id
+                    )
+                )
+
+                if conflicting_orders:
+                    raise UserError(
+                        "Una o más boletas ya pertenecen a otro Resumen Diario."
+                    )
+
+                batch.order_ids.filtered(lambda o: not o.sunat_rc_batch_id).write(
+                    {
+                        "sunat_rc_batch_id": batch.id,
+                    }
+                )
+
+            try:
                 first_order = batch.order_ids[0]
                 cfg = first_order.session_id.config_id.sudo()
                 company_vat = first_order.company_id.vat
 
-                signed_xml = SunatSigner.sign_xml(
-                    rc_xml,
-                    cfg.sunat_certificate_path,
-                    cfg.sunat_certificate_password,
-                )
+                # =====================================================
+                # REUTILIZAR EL MISMO RC EN LOS REINTENTOS
+                # =====================================================
+                if (
+                    batch.name
+                    and batch.xml_file
+                    and batch.xml_filename
+                    and batch.zip_file
+                    and batch.zip_filename
+                ):
+                    # El RC ya fue generado anteriormente.
+                    # No generar ni firmar nuevamente.
+                    rc_id = batch.name
+                    xml_name = batch.xml_filename
+                    zip_name = batch.zip_filename
+                    zip_binary = batch.zip_file
 
-                zip_name = f"{company_vat}-{rc_id}.zip"
-                xml_name = f"{company_vat}-{rc_id}.xml"
+                else:
+                    # =================================================
+                    # PRIMER INTENTO: GENERAR Y GUARDAR EL RC
+                    # =================================================
+                    # RC normal = 1 (Adicionar)
+                    # RC de baja = 3 (Anulado)
+                    condition_code = "3" if batch.summary_type == "cancel" else "1"
 
-                mem_zip = io.BytesIO()
+                    rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(
+                        batch.order_ids,
+                        condition_code=condition_code,
+                    )
 
-                with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                    zf.writestr(xml_name, signed_xml)
+                    signed_xml = SunatSigner.sign_xml(
+                        rc_xml,
+                        cfg.sunat_certificate_path,
+                        cfg.sunat_certificate_password,
+                    )
 
-                zip_binary = base64.b64encode(mem_zip.getvalue())
+                    zip_name = f"{company_vat}-{rc_id}.zip"
+                    xml_name = f"{company_vat}-{rc_id}.xml"
+
+                    mem_zip = io.BytesIO()
+
+                    with zipfile.ZipFile(
+                        mem_zip,
+                        "w",
+                        zipfile.ZIP_DEFLATED,
+                    ) as zf:
+                        zf.writestr(xml_name, signed_xml)
+
+                    zip_binary = base64.b64encode(mem_zip.getvalue())
+
+                    # Guardarlo ANTES de intentar enviarlo a SUNAT.
+                    # Si ocurre timeout/502, el siguiente intento usará
+                    # exactamente este mismo RC, XML y ZIP.
+                    batch.write(
+                        {
+                            "name": rc_id,
+                            "state": "generated",
+                            "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
+                            "xml_filename": xml_name,
+                            "zip_file": zip_binary,
+                            "zip_filename": zip_name,
+                            "response_message": (
+                                "Resumen RC generado y pendiente de envío a SUNAT."
+                            ),
+                        }
+                    )
 
                 username = f"{company_vat}{cfg.sunat_user}"
 
@@ -167,13 +257,12 @@ class SunatSummaryBatch(models.Model):
                 if not match:
                     batch.write(
                         {
-                            "name": rc_id,
-                            "state": "error",
-                            "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
-                            "xml_filename": xml_name,
-                            "zip_file": zip_binary,
-                            "zip_filename": zip_name,
-                            "response_message": f"HTTP {status_code}\n{response[:3000]}",
+                            "state": "generated",
+                            "response_message": (
+                                "SUNAT no devolvió un ticket. "
+                                "El mismo RC queda pendiente de reintento.\n\n"
+                                f"HTTP {status_code}\n{response[:3000]}"
+                            ),
                         }
                     )
                     continue
@@ -185,11 +274,9 @@ class SunatSummaryBatch(models.Model):
                         "name": rc_id,
                         "ticket": ticket,
                         "state": "sent",
-                        "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
-                        "xml_filename": xml_name,
-                        "zip_file": zip_binary,
-                        "zip_filename": zip_name,
-                        "response_message": "Resumen RC enviado. Ticket SUNAT recibido.",
+                        "response_message": (
+                            "Resumen RC enviado. Ticket SUNAT recibido."
+                        ),
                     }
                 )
 
@@ -228,15 +315,44 @@ class SunatSummaryBatch(models.Model):
             except Exception as e:
                 batch.write(
                     {
-                        "state": "error",
-                        "response_message": f"Error enviando RC: {str(e)}",
+                        "state": "generated",
+                        "response_message": (
+                            "No se pudo enviar el RC a SUNAT. "
+                            "El mismo resumen queda pendiente de reintento.\n\n"
+                            f"Error: {str(e)}"
+                        ),
                     }
                 )
 
         return True
 
+    @api.model
+    def cron_retry_pending_summaries(self):
+        batches = self.search(
+            [
+                ("state", "in", ["generated", "sent"]),
+            ]
+        )
+
+        for batch in batches:
+            if batch.ticket:
+                # SUNAT ya recibió el RC.
+                # Solo consultar nuevamente el mismo ticket.
+                batch.action_check_ticket()
+            else:
+                # El RC ya está generado pero todavía no tiene ticket.
+                # Reintentar el envío usando el mismo XML y ZIP.
+                batch.action_send_summary()
+
+        return True
+
     def action_check_ticket(self):
         for batch in self:
+
+            # Un RC aceptado es un estado final.
+            # No volver a consultar el ticket ni degradar su estado.
+            if batch.state == "accepted":
+                continue
 
             if not batch.ticket:
                 batch.write(
@@ -271,6 +387,61 @@ class SunatSummaryBatch(models.Model):
                         "response_message": f"HTTP {status_code}\n{response[:3000]}",
                     }
                 )
+
+                # Revisar primero el statusCode antes de intentar abrir <content>.
+                # SUNAT solo garantiza un ZIP en content cuando el código es 0 o 99.
+                status_match = re.search(
+                    r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
+                    response,
+                    re.DOTALL,
+                )
+
+                if status_match:
+                    status_code_sunat = status_match.group(1).strip()
+
+                    # 98 = SUNAT todavía está procesando el ticket.
+                    if status_code_sunat == "98":
+                        batch.write(
+                            {
+                                "state": "sent",
+                                "response_message": (
+                                    f"SUNAT aún está procesando el ticket {batch.ticket}. "
+                                    "Código estado SUNAT: 98. "
+                                    "Se volverá a consultar automáticamente."
+                                ),
+                            }
+                        )
+                        continue
+
+                    # Para cualquier código distinto de 0, 98 o 99,
+                    # no asumir que <content> contiene un ZIP.
+                    if status_code_sunat not in ("0", "99"):
+                        desc_match = re.search(
+                            r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
+                            response,
+                            re.DOTALL,
+                        )
+
+                        desc = (
+                            desc_match.group(1).strip()
+                            if desc_match
+                            else "Sin mensaje adicional de SUNAT."
+                        )
+
+                        batch.write(
+                            {
+                                "state": "error",
+                                "response_message": (
+                                    f"SUNAT respondió al ticket {batch.ticket} "
+                                    f"con un código no procesable automáticamente: "
+                                    f"{status_code_sunat}.\n"
+                                    f"{desc}\n\n"
+                                    "No se reenviará el RC automáticamente. "
+                                    "Requiere revisión."
+                                ),
+                            }
+                        )
+                        continue
 
                 # 1. Primero buscar CDR en <content>.
                 # SUNAT puede devolver statusCode 99 junto con content,
@@ -392,48 +563,18 @@ class SunatSummaryBatch(models.Model):
 
                     continue
 
-                # 2. Si NO hay content, recién revisar statusCode.
-                status_match = re.search(
-                    r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
-                    response,
-                    re.DOTALL,
-                )
-
+                # 2. SUNAT devolvió 0 o 99, pero no llegó el CDR ZIP esperado.
+                # Mantener el mismo ticket pendiente para volver a consultarlo.
                 if status_match:
-                    status_code_sunat = status_match.group(1).strip()
-
-                    if status_code_sunat in ("98", "99"):
-                        batch.write(
-                            {
-                                "state": "sent",
-                                "response_message": (
-                                    f"SUNAT aún está procesando el ticket {batch.ticket}. "
-                                    f"Código estado SUNAT: {status_code_sunat}. "
-                                    "Volver a consultar en unos minutos.\n\n"
-                                    f"{response[:3000]}"
-                                ),
-                            }
-                        )
-                        continue
-
-                    desc_match = re.search(
-                        r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
-                        response,
-                        re.DOTALL,
-                    )
-
-                    desc = (
-                        desc_match.group(1).strip() if desc_match else response[:1000]
-                    )
-
                     batch.write(
                         {
                             "state": "sent",
                             "response_message": (
-                                f"SUNAT respondió con estado {status_code_sunat}. "
-                                "No se marcará como error automático. "
-                                "Volver a consultar el ticket.\n\n"
-                                f"{response[:3000]}"
+                                f"SUNAT devolvió el estado {status_code_sunat} "
+                                f"para el ticket {batch.ticket}, pero no se recibió "
+                                "el CDR ZIP esperado. "
+                                "Se mantendrá pendiente y se volverá a consultar "
+                                "el mismo ticket."
                             ),
                         }
                     )
