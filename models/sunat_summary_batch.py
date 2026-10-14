@@ -349,6 +349,11 @@ class SunatSummaryBatch(models.Model):
     def action_check_ticket(self):
         for batch in self:
 
+            # Un RC aceptado es un estado final.
+            # No volver a consultar el ticket ni degradar su estado.
+            if batch.state == "accepted":
+                continue
+
             if not batch.ticket:
                 batch.write(
                     {
@@ -382,6 +387,61 @@ class SunatSummaryBatch(models.Model):
                         "response_message": f"HTTP {status_code}\n{response[:3000]}",
                     }
                 )
+
+                # Revisar primero el statusCode antes de intentar abrir <content>.
+                # SUNAT solo garantiza un ZIP en content cuando el código es 0 o 99.
+                status_match = re.search(
+                    r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
+                    response,
+                    re.DOTALL,
+                )
+
+                if status_match:
+                    status_code_sunat = status_match.group(1).strip()
+
+                    # 98 = SUNAT todavía está procesando el ticket.
+                    if status_code_sunat == "98":
+                        batch.write(
+                            {
+                                "state": "sent",
+                                "response_message": (
+                                    f"SUNAT aún está procesando el ticket {batch.ticket}. "
+                                    "Código estado SUNAT: 98. "
+                                    "Se volverá a consultar automáticamente."
+                                ),
+                            }
+                        )
+                        continue
+
+                    # Para cualquier código distinto de 0, 98 o 99,
+                    # no asumir que <content> contiene un ZIP.
+                    if status_code_sunat not in ("0", "99"):
+                        desc_match = re.search(
+                            r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
+                            response,
+                            re.DOTALL,
+                        )
+
+                        desc = (
+                            desc_match.group(1).strip()
+                            if desc_match
+                            else "Sin mensaje adicional de SUNAT."
+                        )
+
+                        batch.write(
+                            {
+                                "state": "error",
+                                "response_message": (
+                                    f"SUNAT respondió al ticket {batch.ticket} "
+                                    f"con un código no procesable automáticamente: "
+                                    f"{status_code_sunat}.\n"
+                                    f"{desc}\n\n"
+                                    "No se reenviará el RC automáticamente. "
+                                    "Requiere revisión."
+                                ),
+                            }
+                        )
+                        continue
 
                 # 1. Primero buscar CDR en <content>.
                 # SUNAT puede devolver statusCode 99 junto con content,
@@ -503,48 +563,18 @@ class SunatSummaryBatch(models.Model):
 
                     continue
 
-                # 2. Si NO hay content, recién revisar statusCode.
-                status_match = re.search(
-                    r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
-                    response,
-                    re.DOTALL,
-                )
-
+                # 2. SUNAT devolvió 0 o 99, pero no llegó el CDR ZIP esperado.
+                # Mantener el mismo ticket pendiente para volver a consultarlo.
                 if status_match:
-                    status_code_sunat = status_match.group(1).strip()
-
-                    if status_code_sunat in ("98", "99"):
-                        batch.write(
-                            {
-                                "state": "sent",
-                                "response_message": (
-                                    f"SUNAT aún está procesando el ticket {batch.ticket}. "
-                                    f"Código estado SUNAT: {status_code_sunat}. "
-                                    "Volver a consultar en unos minutos.\n\n"
-                                    f"{response[:3000]}"
-                                ),
-                            }
-                        )
-                        continue
-
-                    desc_match = re.search(
-                        r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
-                        response,
-                        re.DOTALL,
-                    )
-
-                    desc = (
-                        desc_match.group(1).strip() if desc_match else response[:1000]
-                    )
-
                     batch.write(
                         {
                             "state": "sent",
                             "response_message": (
-                                f"SUNAT respondió con estado {status_code_sunat}. "
-                                "No se marcará como error automático. "
-                                "Volver a consultar el ticket.\n\n"
-                                f"{response[:3000]}"
+                                f"SUNAT devolvió el estado {status_code_sunat} "
+                                f"para el ticket {batch.ticket}, pero no se recibió "
+                                "el CDR ZIP esperado. "
+                                "Se mantendrá pendiente y se volverá a consultar "
+                                "el mismo ticket."
                             ),
                         }
                     )
