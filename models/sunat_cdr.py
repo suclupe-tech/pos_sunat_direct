@@ -16,6 +16,35 @@ class SunatCDR:
         return match.group(1) if match else None
 
     @staticmethod
+    def extract_content(response_text):
+        match = re.search(
+            r"<(?:\w+:)?content>(.*?)</(?:\w+:)?content>",
+            response_text,
+            re.DOTALL,
+        )
+
+        return match.group(1).strip() if match else None
+
+    @staticmethod
+    def extract_status(response_text):
+        code_match = re.search(
+            r"<(?:\w+:)?statusCode>(.*?)</(?:\w+:)?statusCode>",
+            response_text,
+            re.DOTALL,
+        )
+
+        message_match = re.search(
+            r"<(?:\w+:)?statusMessage>(.*?)</(?:\w+:)?statusMessage>",
+            response_text,
+            re.DOTALL,
+        )
+
+        return {
+            "code": code_match.group(1).strip() if code_match else "",
+            "message": message_match.group(1).strip() if message_match else "",
+        }
+
+    @staticmethod
     def parse_cdr(cdr_base64):
         cdr_zip_bytes = base64.b64decode(cdr_base64)
 

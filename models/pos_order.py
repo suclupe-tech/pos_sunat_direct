@@ -424,6 +424,8 @@ class PosOrder(models.Model):
                 )
                 continue
 
+            send_attempted = False
+
             try:
                 if not order.sunat_xml:
                     raise Exception("Primero genere XML SUNAT")
@@ -465,6 +467,9 @@ class PosOrder(models.Model):
 
                 username = f"{order.company_id.vat}{cfg.sunat_user}"
 
+                # Desde este punto sí hubo intento real de comunicación con SUNAT.
+                send_attempted = True
+
                 status_code, response_text = SunatClient.send_bill(
                     cfg.sunat_mode,
                     username,
@@ -478,8 +483,12 @@ class PosOrder(models.Model):
                 if not cdr_base64:
                     order.write(
                         {
-                            "sunat_state": "respuesta_sunat",
-                            "sunat_message": f"HTTP {status_code}\n{response_text[:3000]}",
+                            "sunat_state": "pendiente_verificacion",
+                            "sunat_message": (
+                                "SUNAT respondió pero no se recibió un CDR. "
+                                "Se verificará el estado del comprobante antes de reenviarlo.\n\n"
+                                f"HTTP {status_code}\n{response_text[:3000]}"
+                            ),
                         }
                     )
                     continue
@@ -501,12 +510,34 @@ class PosOrder(models.Model):
                 )
 
             except Exception as e:
-                order.write(
-                    {
-                        "sunat_state": "pendiente_envio",
-                        "sunat_message": f"Pendiente de envío: {str(e)}",
-                    }
-                )
+                if send_attempted:
+                    # Ya se intentó comunicar con SUNAT.
+                    # No sabemos si recibió el comprobante.
+                    order.write(
+                        {
+                            "sunat_state": "pendiente_verificacion",
+                            "sunat_message": (
+                                "No se pudo confirmar la respuesta de SUNAT. "
+                                "Se verificará el comprobante antes de intentar "
+                                "reenviarlo.\n\n"
+                                f"Error: {str(e)}"
+                            ),
+                        }
+                    )
+                else:
+                    # El error ocurrió antes de intentar sendBill.
+                    # SUNAT no fue contactado.
+                    order.write(
+                        {
+                            "sunat_state": "error",
+                            "sunat_message": (
+                                "No se pudo preparar el comprobante para SUNAT. "
+                                "No se realizará un reenvío automático hasta "
+                                "corregir el problema.\n\n"
+                                f"Error: {str(e)}"
+                            ),
+                        }
+                    )
 
         return True
 
@@ -522,6 +553,204 @@ class PosOrder(models.Model):
 
         for order in pendientes:
             order.action_send_sunat()
+
+        return True
+
+    def action_verify_sunat_invoice(self):
+        for order in self:
+
+            if order.sunat_document_type != "01":
+                continue
+
+            if order.sunat_state != "pendiente_verificacion":
+                continue
+
+            if not order.sunat_document_number:
+                order.write(
+                    {
+                        "sunat_message": (
+                            "No se puede verificar en SUNAT porque "
+                            "el comprobante no tiene número."
+                        )
+                    }
+                )
+                continue
+
+            try:
+                serie, correlativo = order.sunat_document_number.split("-", 1)
+
+                # Para las consultas SUNAT usamos el correlativo numérico
+                # sin ceros a la izquierda.
+                correlativo_consulta = str(int(correlativo))
+
+                cfg = order.session_id.config_id.sudo()
+
+                # El servicio billConsultService corresponde a producción.
+                # En modo BETA no debemos consultar ni decidir reenvíos
+                # utilizando información del ambiente de producción.
+                if cfg.sunat_mode == "beta":
+                    order.write(
+                        {
+                            "sunat_message": (
+                                "La factura está pendiente de verificación. "
+                                "La consulta automática de CDR no se ejecuta "
+                                "en modo BETA porque billConsultService "
+                                "corresponde al ambiente de producción."
+                            )
+                        }
+                    )
+                    continue
+
+                company_vat = order.company_id.vat
+                username = f"{company_vat}{cfg.sunat_user}"
+
+                status_code, response_text = SunatClient.get_status_cdr(
+                    username,
+                    cfg.sunat_password,
+                    company_vat,
+                    order.sunat_document_type,
+                    serie,
+                    correlativo_consulta,
+                )
+
+                cdr_base64 = SunatCDR.extract_content(response_text)
+
+                if cdr_base64:
+                    cdr = SunatCDR.parse_cdr(cdr_base64)
+
+                    estado = "aceptado" if cdr["code"] == "0" else "observado"
+
+                    order.write(
+                        {
+                            "sunat_state": estado,
+                            "sunat_cdr_filename": (
+                                f"R-{order.sunat_zip_filename}"
+                                if order.sunat_zip_filename
+                                else False
+                            ),
+                            "sunat_cdr_file": cdr_base64,
+                            "sunat_cdr_code": cdr["code"],
+                            "sunat_cdr_description": cdr["description"],
+                            "sunat_message": (
+                                "CDR recuperado mediante consulta SUNAT. "
+                                f"Código={cdr['code']} | "
+                                f"{cdr['description']}"
+                            ),
+                        }
+                    )
+                    continue
+
+                # =====================================================
+                # NO SE RECUPERÓ CDR: CONSULTAR SI EL DOCUMENTO EXISTE
+                # =====================================================
+
+                status_http, status_response = SunatClient.get_document_status(
+                    username,
+                    cfg.sunat_password,
+                    company_vat,
+                    order.sunat_document_type,
+                    serie,
+                    correlativo_consulta,
+                )
+
+                sunat_status = SunatCDR.extract_status(status_response)
+                sunat_code = sunat_status["code"]
+                sunat_status_message = sunat_status["message"]
+
+                # -----------------------------------------------------
+                # 0011: SUNAT confirma que el comprobante NO existe.
+                # Recién aquí es seguro habilitar un nuevo envío.
+                # -----------------------------------------------------
+                if sunat_code == "0011":
+                    order.write(
+                        {
+                            "sunat_state": "pendiente_envio",
+                            "sunat_message": (
+                                "SUNAT confirmó que el comprobante no existe. "
+                                "Queda habilitado para reintento de envío.\n\n"
+                                f"Código SUNAT: {sunat_code} - "
+                                f"{sunat_status_message}"
+                            ),
+                        }
+                    )
+                    continue
+
+                # -----------------------------------------------------
+                # 0001: existe y está aceptado.
+                # NO reenviar. Seguimos intentando recuperar el CDR.
+                # -----------------------------------------------------
+                if sunat_code == "0001":
+                    order.write(
+                        {
+                            "sunat_message": (
+                                "SUNAT confirmó que el comprobante existe "
+                                "y está aceptado, pero todavía no se recuperó "
+                                "el CDR. No se reenviará.\n\n"
+                                f"Código SUNAT: {sunat_code} - "
+                                f"{sunat_status_message}"
+                            ),
+                        }
+                    )
+                    continue
+
+                # -----------------------------------------------------
+                # 0002: existe pero fue rechazado.
+                # No se debe reenviar el mismo comprobante.
+                # -----------------------------------------------------
+                if sunat_code == "0002":
+                    order.write(
+                        {
+                            "sunat_state": "observado",
+                            "sunat_message": (
+                                "SUNAT confirmó que el comprobante fue rechazado. "
+                                "No se realizará un reenvío automático.\n\n"
+                                f"Código SUNAT: {sunat_code} - "
+                                f"{sunat_status_message}"
+                            ),
+                        }
+                    )
+                    continue
+
+                # -----------------------------------------------------
+                # 0003: el comprobante existe pero está de baja.
+                # -----------------------------------------------------
+                if sunat_code == "0003":
+                    order.write(
+                        {
+                            "sunat_state": "baja_aceptada",
+                            "sunat_message": (
+                                "SUNAT confirmó que el comprobante está de baja.\n\n"
+                                f"Código SUNAT: {sunat_code} - "
+                                f"{sunat_status_message}"
+                            ),
+                        }
+                    )
+                    continue
+
+                # Cualquier otra respuesta NO autoriza un reenvío.
+                order.write(
+                    {
+                        "sunat_message": (
+                            "No fue posible confirmar de forma segura "
+                            "el estado del comprobante. "
+                            "Se mantendrá pendiente de verificación.\n\n"
+                            f"HTTP {status_http}\n"
+                            f"Código SUNAT: {sunat_code or 'sin código'}\n"
+                            f"{sunat_status_message or status_response[:2000]}"
+                        )
+                    }
+                )
+
+            except Exception as e:
+                order.write(
+                    {
+                        "sunat_message": (
+                            "No se pudo verificar el comprobante en SUNAT. "
+                            "Se mantendrá pendiente de verificación.\n\n"
+                            f"Error: {str(e)}"
+                        )
+                    }
+                )
 
         return True
 
@@ -597,8 +826,13 @@ class PosOrder(models.Model):
             if pos_order and pos_order.exists():
                 pos_order.write(
                     {
-                        "sunat_state": "pendiente_envio",
-                        "sunat_message": f"Error auto envío: {str(e)}",
+                        "sunat_state": "error",
+                        "sunat_message": (
+                            "Error preparando el documento SUNAT. "
+                            "No se realizará un reenvío automático "
+                            "hasta corregir el problema.\n\n"
+                            f"Error: {str(e)}"
+                        ),
                     }
                 )
 

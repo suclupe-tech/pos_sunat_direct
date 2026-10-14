@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 from odoo.exceptions import UserError
 from .sunat_summary_builder import SunatSummaryBuilder
 from .sunat_signer import SunatSigner
@@ -98,6 +98,12 @@ class SunatSummaryBatch(models.Model):
     def action_send_summary(self):
         for batch in self:
 
+            # Si SUNAT ya entregó un ticket, no volver a enviar el RC.
+            # Solo se debe consultar el estado del mismo ticket.
+            if batch.ticket:
+                batch.action_check_ticket()
+                continue
+
             if not batch.order_ids:
                 batch.write(
                     {
@@ -107,35 +113,119 @@ class SunatSummaryBatch(models.Model):
                 )
                 continue
 
-            try:
-                # RC normal = 1 (Adicionar)
-                # RC de baja = 3 (Anulado)
-                condition_code = "3" if batch.summary_type == "cancel" else "1"
-
-                rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(
-                    batch.order_ids,
-                    condition_code=condition_code,
+            # =====================================================
+            # RESERVAR COMPROBANTES AL INICIAR EL ENVÍO
+            # =====================================================
+            if batch.summary_type == "cancel":
+                conflicting_orders = batch.order_ids.filtered(
+                    lambda o: (
+                        o.sunat_cancel_rc_batch_id
+                        and o.sunat_cancel_rc_batch_id.id != batch.id
+                    )
                 )
 
+                if conflicting_orders:
+                    raise UserError(
+                        "Una o más boletas ya pertenecen a otro RC de baja."
+                    )
+
+                batch.order_ids.filtered(
+                    lambda o: not o.sunat_cancel_rc_batch_id
+                ).write(
+                    {
+                        "sunat_cancel_rc_batch_id": batch.id,
+                    }
+                )
+
+            else:
+                conflicting_orders = batch.order_ids.filtered(
+                    lambda o: (
+                        o.sunat_rc_batch_id and o.sunat_rc_batch_id.id != batch.id
+                    )
+                )
+
+                if conflicting_orders:
+                    raise UserError(
+                        "Una o más boletas ya pertenecen a otro Resumen Diario."
+                    )
+
+                batch.order_ids.filtered(lambda o: not o.sunat_rc_batch_id).write(
+                    {
+                        "sunat_rc_batch_id": batch.id,
+                    }
+                )
+
+            try:
                 first_order = batch.order_ids[0]
                 cfg = first_order.session_id.config_id.sudo()
                 company_vat = first_order.company_id.vat
 
-                signed_xml = SunatSigner.sign_xml(
-                    rc_xml,
-                    cfg.sunat_certificate_path,
-                    cfg.sunat_certificate_password,
-                )
+                # =====================================================
+                # REUTILIZAR EL MISMO RC EN LOS REINTENTOS
+                # =====================================================
+                if (
+                    batch.name
+                    and batch.xml_file
+                    and batch.xml_filename
+                    and batch.zip_file
+                    and batch.zip_filename
+                ):
+                    # El RC ya fue generado anteriormente.
+                    # No generar ni firmar nuevamente.
+                    rc_id = batch.name
+                    xml_name = batch.xml_filename
+                    zip_name = batch.zip_filename
+                    zip_binary = batch.zip_file
 
-                zip_name = f"{company_vat}-{rc_id}.zip"
-                xml_name = f"{company_vat}-{rc_id}.xml"
+                else:
+                    # =================================================
+                    # PRIMER INTENTO: GENERAR Y GUARDAR EL RC
+                    # =================================================
+                    # RC normal = 1 (Adicionar)
+                    # RC de baja = 3 (Anulado)
+                    condition_code = "3" if batch.summary_type == "cancel" else "1"
 
-                mem_zip = io.BytesIO()
+                    rc_id, rc_xml = SunatSummaryBuilder.build_rc_xml(
+                        batch.order_ids,
+                        condition_code=condition_code,
+                    )
 
-                with zipfile.ZipFile(mem_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                    zf.writestr(xml_name, signed_xml)
+                    signed_xml = SunatSigner.sign_xml(
+                        rc_xml,
+                        cfg.sunat_certificate_path,
+                        cfg.sunat_certificate_password,
+                    )
 
-                zip_binary = base64.b64encode(mem_zip.getvalue())
+                    zip_name = f"{company_vat}-{rc_id}.zip"
+                    xml_name = f"{company_vat}-{rc_id}.xml"
+
+                    mem_zip = io.BytesIO()
+
+                    with zipfile.ZipFile(
+                        mem_zip,
+                        "w",
+                        zipfile.ZIP_DEFLATED,
+                    ) as zf:
+                        zf.writestr(xml_name, signed_xml)
+
+                    zip_binary = base64.b64encode(mem_zip.getvalue())
+
+                    # Guardarlo ANTES de intentar enviarlo a SUNAT.
+                    # Si ocurre timeout/502, el siguiente intento usará
+                    # exactamente este mismo RC, XML y ZIP.
+                    batch.write(
+                        {
+                            "name": rc_id,
+                            "state": "generated",
+                            "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
+                            "xml_filename": xml_name,
+                            "zip_file": zip_binary,
+                            "zip_filename": zip_name,
+                            "response_message": (
+                                "Resumen RC generado y pendiente de envío a SUNAT."
+                            ),
+                        }
+                    )
 
                 username = f"{company_vat}{cfg.sunat_user}"
 
@@ -167,13 +257,12 @@ class SunatSummaryBatch(models.Model):
                 if not match:
                     batch.write(
                         {
-                            "name": rc_id,
-                            "state": "error",
-                            "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
-                            "xml_filename": xml_name,
-                            "zip_file": zip_binary,
-                            "zip_filename": zip_name,
-                            "response_message": f"HTTP {status_code}\n{response[:3000]}",
+                            "state": "generated",
+                            "response_message": (
+                                "SUNAT no devolvió un ticket. "
+                                "El mismo RC queda pendiente de reintento.\n\n"
+                                f"HTTP {status_code}\n{response[:3000]}"
+                            ),
                         }
                     )
                     continue
@@ -185,11 +274,9 @@ class SunatSummaryBatch(models.Model):
                         "name": rc_id,
                         "ticket": ticket,
                         "state": "sent",
-                        "xml_file": base64.b64encode(signed_xml.encode("utf-8")),
-                        "xml_filename": xml_name,
-                        "zip_file": zip_binary,
-                        "zip_filename": zip_name,
-                        "response_message": "Resumen RC enviado. Ticket SUNAT recibido.",
+                        "response_message": (
+                            "Resumen RC enviado. Ticket SUNAT recibido."
+                        ),
                     }
                 )
 
@@ -228,10 +315,34 @@ class SunatSummaryBatch(models.Model):
             except Exception as e:
                 batch.write(
                     {
-                        "state": "error",
-                        "response_message": f"Error enviando RC: {str(e)}",
+                        "state": "generated",
+                        "response_message": (
+                            "No se pudo enviar el RC a SUNAT. "
+                            "El mismo resumen queda pendiente de reintento.\n\n"
+                            f"Error: {str(e)}"
+                        ),
                     }
                 )
+
+        return True
+
+    @api.model
+    def cron_retry_pending_summaries(self):
+        batches = self.search(
+            [
+                ("state", "in", ["generated", "sent"]),
+            ]
+        )
+
+        for batch in batches:
+            if batch.ticket:
+                # SUNAT ya recibió el RC.
+                # Solo consultar nuevamente el mismo ticket.
+                batch.action_check_ticket()
+            else:
+                # El RC ya está generado pero todavía no tiene ticket.
+                # Reintentar el envío usando el mismo XML y ZIP.
+                batch.action_send_summary()
 
         return True
 
