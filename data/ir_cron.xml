@@ -8,7 +8,15 @@
         <field name="interval_number">1</field>
         <field name="interval_type">days</field>
         <field name="active">True</field>
-        <field name="nextcall" eval="(DateTime.now().replace(hour=23, minute=0, second=0)).strftime('%Y-%m-%d %H:%M:%S')"/>
+
+        <!--
+            Odoo almacena nextcall en UTC.
+            04:00 UTC = 23:00 hora Perú (UTC-5).
+
+            Se calcula siempre la próxima ocurrencia de las 04:00 UTC.
+        -->
+        <field name="nextcall"
+               eval="(DateTime.utcnow().replace(hour=4, minute=0, second=0, microsecond=0) + timedelta(days=1 if DateTime.utcnow().hour >= 4 else 0)).strftime('%Y-%m-%d %H:%M:%S')"/>
     </record>
 
     <record id="ir_cron_check_pending_tickets" model="ir.cron">
