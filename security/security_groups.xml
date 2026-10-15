@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- ============================================================
+         RESPONSABLE SUNAT
+         Permite mostrar opciones administrativas de SUNAT
+         únicamente a los usuarios autorizados.
+         ============================================================ -->
+    <record id="group_responsable_sunat" model="res.groups">
+        <field name="name">Responsable SUNAT</field>
+    </record>
+
+</odoo>
