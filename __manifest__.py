@@ -8,6 +8,7 @@
         "stock",
     ],
     "data": [
+        "security/security_groups.xml",
         "security/ir.model.access.csv",
         "data/sequence_data.xml",
         "data/ir_cron.xml",

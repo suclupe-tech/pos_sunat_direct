@@ -95,7 +95,8 @@
     </record>
 
     <menuitem id="menu_sunat_summary_batch"
-              name="Resumenes RC SUNAT"
-              action="action_sunat_summary_batch"
-              sequence="90"/>
+          name="Resumenes RC SUNAT"
+          action="action_sunat_summary_batch"
+          sequence="90"
+          groups="pos_sunat_direct.group_responsable_sunat"/>
 </odoo>
